@@ -1,5 +1,6 @@
 #include <iostream>
 #include <string>
+#include <vector>
 #include <cstdlib>
 #include <fstream>
 
@@ -11,6 +12,7 @@ int main() {
    std::string shellPath = std::getenv("SHELL");
    std::string shellName = shellPath.substr(shellPath.find_last_of('/') + 1);
    std::string home = std::getenv("HOME");
+   std::vector<std::string> historyList;
 
    if (home.empty()) {
       std::cerr << "HOME environment variable is not set";
@@ -38,9 +40,11 @@ int main() {
 
    std::string line;
    while (std::getline(file, line)) {
-      std::cout << line << '\n';
+      historyList.push_back(line);
    }
    file.close();
+
+   std::cout << historyList.size();
 
    return 0;
 }
