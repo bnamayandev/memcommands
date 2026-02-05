@@ -1,19 +1,18 @@
+#include <cctype>
 #include <string>
-#include <cstdlib>
 
-// Computes how close a query is to the target, where the target
-// is what the user is currently inputting, and the queries are
-// all the previous commands the user has in their history.
-// a positive score is returned if all the characters are returned in oreder,
-// a -1 is returned if there is no characters in order or subsequence at all
 int fuzzyScore(const std::string& query, const std::string& target) {
+    auto lc = [](unsigned char c) { return std::tolower(c); };
+
     int score = 0;
     int qi = 0;
     int lastMatch = -1;
     int consecutive = 0;
 
-    for (int ti = 0; ti < target.size() && qi < query.size(); ti++) {
-        if (tolower(target[ti]) == tolower(query[qi])) {
+    for (int ti = 0; ti < (int)target.size() && qi < (int)query.size(); ti++) {
+        score -= 1; 
+
+        if (lc((unsigned char)target[ti]) == lc((unsigned char)query[qi])) {
             score += 5;
 
             if (lastMatch == ti - 1) {
@@ -21,7 +20,8 @@ int fuzzyScore(const std::string& query, const std::string& target) {
                 score += consecutive * 15;
             } else {
                 consecutive = 0;
-                score -= (ti - lastMatch);
+                int gap = (lastMatch == -1) ? ti : (ti - lastMatch - 1);
+                score -= gap; 
             }
 
             if (ti == 0 || target[ti - 1] == ' ' ||
@@ -34,5 +34,5 @@ int fuzzyScore(const std::string& query, const std::string& target) {
         }
     }
 
-    return (qi == query.size()) ? score : -1;
+    return (qi == (int)query.size()) ? score : -1;
 }
