@@ -1,9 +1,7 @@
-#include <string>
+#include "input.h"
 #include <iostream>
-#include <cstdlib>
-#include "fzf.h"
 
 int main() {
-   std::cout << fuzzyScore("git", "git commit -m");
-   return 0;
+    std::string query = readQuery();
+    std::cout << "Final query was: " << query << "\n";
 }
