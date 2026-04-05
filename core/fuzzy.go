@@ -57,6 +57,7 @@ func FuzzyScore(query, target string) int {
 type ScoredCommand struct {
 	Score   int
 	Command string
+	Index   int
 }
 
 func GetFuzzyScoreList(commandHistory []string, query string) []ScoredCommand {
@@ -64,14 +65,18 @@ func GetFuzzyScoreList(commandHistory []string, query string) []ScoredCommand {
 
 	query = strings.TrimSpace(query)
 
-	for _, cmd := range commandHistory {
+	for i, cmd := range commandHistory {
 		out = append(out, ScoredCommand{
 			Score:   FuzzyScore(query, cmd),
 			Command: cmd,
+			Index:   i,
 		})
 	}
 
 	sort.Slice(out, func(i, j int) bool {
+		if out[i].Score == out[j].Score {
+			return out[i].Index > out[j].Index
+		}
 		return out[i].Score > out[j].Score
 	})
 
