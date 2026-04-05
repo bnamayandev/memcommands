@@ -1,41 +1,95 @@
-// this is a gpt generated TUI that I put as a placeholder lowkenuinely
 package main
 
 import (
-	"bufio"
-	"fmt"
-	"os"
-	"strings"
+	"log"
 	"memcommands/core"
+
+	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
+type Styles struct {
+	BorderColor lipgloss.Color
+	userInput lipgloss.Style
+}
+
+func DefaultStyles() *Styles {
+	s := new(Styles)
+	s.BorderColor = lipgloss.Color("36")
+	s.userInput = lipgloss.NewStyle().BorderForeground(s.BorderColor).BorderStyle(lipgloss.NormalBorder()).Width(80)
+
+	return s
+}
+
 type model struct {
-	count int
+	commands []string
+	width int
+	height int
+	selectedIndex int16
+	userInput textinput.Model
+	styles *Styles
+}
+
+func New(commands []string) *model {
+	styles := DefaultStyles()
+	userInput := textinput.New()
+	userInput.Placeholder = "_"
+	userInput.Focus()
+	return &model{commands: commands, userInput: userInput, styles: styles}
+}
+
+func (m model) Init() tea.Cmd {
+	return nil
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c" :
+			return m, tea.Quit
+		}
+	}
+
+	m.userInput, cmd = m.userInput.Update(msg)
+	return m, cmd
+}
+
+func (m model) View() string {
+
+	return lipgloss.JoinVertical(
+			lipgloss.Center,
+			m.commands[m.selectedIndex],
+			m.styles.userInput.Render(m.userInput.View()),
+		)
 }
 
 func main() {
-	lines, err := core.GetHistoryLines();
-	reader := bufio.NewReader(os.Stdin);
-	
-	if err != nil {
-		fmt.Println(err) 
+	history, err := core.GetHistoryLines()
+
+	if err != nil{
+		log.Fatal(err)
 		return
 	}
 
-	fmt.Println("Enter input: ");
+	m := New(history);
 
-	input, err := reader.ReadString('\n')
+	f, err := tea.LogToFile("debug.log", "debug")
 	if err != nil {
-		fmt.Println("There was an error reading the input: ")
-		return
+		log.Fatal(err)
 	}
 
-	input = strings.TrimSpace(input)
-	fmt.Printf("You entered: %s\n", input)
-	
-	res := core.GetFuzzyScoreList(lines, input);
-
-	for _, val := range res {
-		fmt.Println(val)
+	defer f.Close()
+	p := tea.NewProgram(m)
+	if _, err := p.Run(); err != nil {
+		log.Fatal(err)
 	}
 }
+
