@@ -28,12 +28,13 @@ func DefaultStyles() *Styles {
 }
 
 type model struct {
-	commands []string
-	width int
-	height int
+	history []string
+	commands      []string
+	width         int
+	height        int
 	selectedIndex int
-	userInput textinput.Model
-	styles *Styles
+	userInput     textinput.Model
+	styles        *Styles
 }
 
 func New(commands []string) *model {
@@ -42,7 +43,15 @@ func New(commands []string) *model {
 	userInput.Placeholder = "_"
 	userInput.Focus()
 
-	return &model{commands: commands, userInput: userInput, styles: styles}
+	m := &model{
+		history: commands,
+		commands:    commands,
+		userInput:   userInput,
+		styles:      styles,
+	}
+
+	m.refreshCommands()
+	return m
 }
 
 func (m model) Init() tea.Cmd {
@@ -57,29 +66,48 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 
-		case tea.KeyMsg:
-			key := msg.String()
-		
-			switch key {
-			case "ctrl+c":
-				return m, tea.Quit
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c":
+			return m, tea.Quit
 
-			case "ctrl+j":
-				if len(m.commands) > 0 && m.selectedIndex < min(9, len(m.commands)-1) {
-					m.selectedIndex++
-				}
-				return m, nil
-		
-			case "ctrl+k":
-				if m.selectedIndex > 0 {
-					m.selectedIndex--
-				}
-				return m, nil
+		case "ctrl+j":
+			if len(m.commands) > 0 && m.selectedIndex < min(9, len(m.commands)-1) {
+				m.selectedIndex++
 			}
+			return m, nil
+
+		case "ctrl+k":
+			if m.selectedIndex > 0 {
+				m.selectedIndex--
+			}
+			return m, nil
 		}
+	}
 
 	m.userInput, cmd = m.userInput.Update(msg)
+	m.refreshCommands()
+
 	return m, cmd
+}
+
+
+func (m *model) refreshCommands() {
+	scored := core.GetFuzzyScoreList(m.history, m.userInput.Value())
+
+	m.commands = m.commands[:0]
+	for _, s := range scored {
+		m.commands = append(m.commands, s.Command)
+	}
+
+	if len(m.commands) == 0 {
+		m.selectedIndex = 0
+		return
+	}
+
+	if m.selectedIndex >= len(m.commands) {
+		m.selectedIndex = len(m.commands) - 1
+	}
 }
 
 func (m model) renderIndexedCommands() string {
@@ -87,7 +115,7 @@ func (m model) renderIndexedCommands() string {
 
 	limit := min(10, len(m.commands))
 	for i := 0; i < limit; i++ {
-		line := fmt.Sprintf("%d. %s", i, m.commands[i])
+		line := fmt.Sprintf("%d. %s", i + 1, m.commands[i])
 
 		if i == m.selectedIndex {
 			line = "> " + line
@@ -126,23 +154,21 @@ func (m model) View() string {
 
 func main() {
 	history, err := core.GetHistoryLines()
-
-	if err != nil{
+	if err != nil {
 		log.Fatal(err)
 		return
 	}
 
-	m := New(history);
+	m := New(history)
 
 	f, err := tea.LogToFile("debug.log", "debug")
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	defer f.Close()
+
 	p := tea.NewProgram(m)
 	if _, err := p.Run(); err != nil {
 		log.Fatal(err)
 	}
 }
-

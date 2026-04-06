@@ -25,28 +25,42 @@ func GetHistoryLines() ([]string, error) {
 	}
 
 	historyList := make([]string, 0, 1024)
-	seen := make(map[string]struct{}, 1024)
 
 	for _, historyFile := range historyFiles {
 		lines, err := readHistoryFile(historyFile.path, historyFile.format)
 		if err != nil {
 			return nil, err
 		}
-
-		for _, line := range lines {
-			if _, ok := seen[line]; ok {
-				continue
-			}
-			seen[line] = struct{}{}
-			historyList = append(historyList, line)
-		}
+		historyList = append(historyList, lines...)
 	}
+
+	historyList = dedupeKeepLast(historyList)
 
 	if len(historyList) == 0 {
 		return nil, fmt.Errorf("no readable history entries found for shell %q", filepath.Base(shellPath))
 	}
 
 	return historyList, nil
+}
+
+func dedupeKeepLast(lines []string) []string {
+	seen := make(map[string]struct{}, len(lines))
+	out := make([]string, 0, len(lines))
+
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		if _, ok := seen[line]; ok {
+			continue
+		}
+		seen[line] = struct{}{}
+		out = append(out, line)
+	}
+
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
+
+	return out
 }
 
 type historyFile struct {

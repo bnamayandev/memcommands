@@ -20,7 +20,7 @@ func FuzzyScore(query, target string) int {
 	tb := []byte(target)
 
 	for ti := 0; ti < len(tb) && qi < len(qb); ti++ {
-		score -= 1 
+		score -= 1
 
 		if lc(tb[ti]) == lc(qb[qi]) {
 			score += 5
@@ -60,17 +60,43 @@ type ScoredCommand struct {
 	Index   int
 }
 
-func GetFuzzyScoreList(commandHistory []string, query string) []ScoredCommand {
-	out := make([]ScoredCommand, 0, len(commandHistory))
+func normalizeCommandKey(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.Join(strings.Fields(s), " ")
+	s = strings.ToLower(s)
+	return s
+}
 
+func GetFuzzyScoreList(commandHistory []string, query string) []ScoredCommand {
 	query = strings.TrimSpace(query)
 
+	bestByCommand := make(map[string]ScoredCommand, len(commandHistory))
+
 	for i, cmd := range commandHistory {
-		out = append(out, ScoredCommand{
-			Score:   FuzzyScore(query, cmd),
-			Command: cmd,
+		score := 0
+		if query != "" {
+			score = FuzzyScore(query, cmd)
+			if score < 0 {
+				continue
+			}
+		}
+
+		key := normalizeCommandKey(cmd)
+		candidate := ScoredCommand{
+			Score:   score,
+			Command: strings.Join(strings.Fields(strings.TrimSpace(cmd)), " "),
 			Index:   i,
-		})
+		}
+
+		existing, ok := bestByCommand[key]
+		if !ok || candidate.Score > existing.Score || (candidate.Score == existing.Score && candidate.Index > existing.Index) {
+			bestByCommand[key] = candidate
+		}
+	}
+
+	out := make([]ScoredCommand, 0, len(bestByCommand))
+	for _, scored := range bestByCommand {
+		out = append(out, scored)
 	}
 
 	sort.Slice(out, func(i, j int) bool {
