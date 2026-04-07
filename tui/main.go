@@ -1,9 +1,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"memcommands/core"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -12,8 +16,8 @@ import (
 )
 
 type Styles struct {
-	BorderColor lipgloss.Color
-	userInput lipgloss.Style
+	BorderColor     lipgloss.Color
+	userInput       lipgloss.Style
 	indexedCommands lipgloss.Style
 }
 
@@ -28,11 +32,12 @@ func DefaultStyles() *Styles {
 }
 
 type model struct {
-	history []string
+	history       []string
 	commands      []string
 	width         int
 	height        int
 	selectedIndex int
+	executed      string
 	userInput     textinput.Model
 	styles        *Styles
 }
@@ -44,10 +49,10 @@ func New(commands []string) *model {
 	userInput.Focus()
 
 	m := &model{
-		history: commands,
-		commands:    commands,
-		userInput:   userInput,
-		styles:      styles,
+		history:   commands,
+		commands:  commands,
+		userInput: userInput,
+		styles:    styles,
 	}
 
 	m.refreshCommands()
@@ -71,6 +76,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c":
 			return m, tea.Quit
 
+		case "enter":
+			cmd := m.selectedCommand()
+			if cmd == "" {
+				return m, nil
+			}
+
+			m.executed = cmd
+			return m, tea.Quit
+
 		case "ctrl+j":
 			if len(m.commands) > 0 && m.selectedIndex < min(9, len(m.commands)-1) {
 				m.selectedIndex++
@@ -91,6 +105,45 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+func (m model) selectedCommand() string {
+	if len(m.commands) == 0 || m.selectedIndex < 0 || m.selectedIndex >= len(m.commands) {
+		return ""
+	}
+	return m.commands[m.selectedIndex]
+}
+
+func shellCommand(command string) *exec.Cmd {
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+
+	cmd := exec.Command(shell, "-lc", command)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd
+}
+
+func commandName(command string) string {
+	fields := strings.Fields(strings.TrimSpace(command))
+	if len(fields) == 0 {
+		return ""
+	}
+
+	return filepath.Base(fields[0])
+}
+
+func filterSelfInvocations(commands []string) []string {
+	out := make([]string, 0, len(commands))
+	for _, command := range commands {
+		if commandName(command) == "memcommands" {
+			continue
+		}
+		out = append(out, command)
+	}
+	return out
+}
 
 func (m *model) refreshCommands() {
 	scored := core.GetFuzzyScoreList(m.history, m.userInput.Value())
@@ -115,7 +168,7 @@ func (m model) renderIndexedCommands() string {
 
 	limit := min(10, len(m.commands))
 	for i := 0; i < limit; i++ {
-		line := fmt.Sprintf("%d. %s", i + 1, m.commands[i])
+		line := fmt.Sprintf("%d. %s", i+1, m.commands[i])
 
 		if i == m.selectedIndex {
 			line = "> " + line
@@ -137,9 +190,9 @@ func min(a, b int) int {
 }
 
 func (m model) View() string {
-	selectedCommand := "No commands loaded"
-	if len(m.commands) > 0 && m.selectedIndex >= 0 && m.selectedIndex < len(m.commands) {
-		selectedCommand = m.commands[m.selectedIndex]
+	selectedCommand := m.selectedCommand()
+	if selectedCommand == "" {
+		selectedCommand = "No commands loaded"
 	}
 
 	indexedBlock := m.styles.indexedCommands.Render(m.renderIndexedCommands())
@@ -159,7 +212,7 @@ func main() {
 		return
 	}
 
-	m := New(history)
+	m := New(filterSelfInvocations(history))
 
 	f, err := tea.LogToFile("debug.log", "debug")
 	if err != nil {
@@ -168,7 +221,18 @@ func main() {
 	defer f.Close()
 
 	p := tea.NewProgram(m)
-	if _, err := p.Run(); err != nil {
+	finalModel, err := p.Run()
+	if err != nil {
 		log.Fatal(err)
+	}
+
+	if m, ok := finalModel.(model); ok && m.executed != "" {
+		if err := shellCommand(m.executed).Run(); err != nil {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) {
+				os.Exit(exitErr.ExitCode())
+			}
+			log.Fatal(err)
+		}
 	}
 }
