@@ -74,6 +74,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "ctrl+c":
+			fmt.Print("\033[H\033[2J") // clear screen and move cursor to top-left
 			return m, tea.Quit
 
 		case "enter":
@@ -83,6 +84,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			m.executed = cmd
+
+			fmt.Print("\033[H\033[2J") // clear screen and move cursor to top-left
 			return m, tea.Quit
 
 		case "ctrl+j":
