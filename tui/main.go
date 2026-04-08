@@ -202,7 +202,6 @@ func (m model) View() string {
 
 	return lipgloss.JoinVertical(
 		lipgloss.Center,
-		selectedCommand,
 		m.styles.userInput.Render(m.userInput.View()),
 		indexedBlock,
 	)
