@@ -23,11 +23,11 @@ type Styles struct {
 
 func DefaultStyles() *Styles {
 	s := new(Styles)
-	s.BorderColor = lipgloss.Color("36")
+	s.BorderColor = lipgloss.Color("#89B4FA")
 
-	s.userInput = lipgloss.NewStyle().BorderForeground(s.BorderColor).BorderStyle(lipgloss.NormalBorder()).Width(80)
+	s.userInput = lipgloss.NewStyle().BorderForeground(s.BorderColor).BorderStyle(lipgloss.NormalBorder())
 
-	s.indexedCommands = lipgloss.NewStyle().BorderForeground(s.BorderColor).BorderStyle(lipgloss.NormalBorder()).Width(80)
+	s.indexedCommands = lipgloss.NewStyle().BorderForeground(s.BorderColor).BorderStyle(lipgloss.NormalBorder())
 	return s
 }
 
@@ -198,11 +198,12 @@ func (m model) View() string {
 		selectedCommand = "No commands loaded"
 	}
 
-	indexedBlock := m.styles.indexedCommands.Render(m.renderIndexedCommands())
+	contentWidth := max(0, m.width-2)
+	indexedBlock := m.styles.indexedCommands.Width(contentWidth).Render(m.renderIndexedCommands())
 
 	return lipgloss.JoinVertical(
-		lipgloss.Center,
-		m.styles.userInput.Render(m.userInput.View()),
+		lipgloss.Left,
+		m.styles.userInput.Width(contentWidth).Render(m.userInput.View()),
 		indexedBlock,
 	)
 }
