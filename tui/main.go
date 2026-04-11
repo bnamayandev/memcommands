@@ -34,6 +34,7 @@ func DefaultStyles() *Styles {
 type model struct {
 	history       []string
 	commands      []string
+	aliases       core.AliasIndex
 	width         int
 	height        int
 	selectedIndex int
@@ -42,7 +43,7 @@ type model struct {
 	styles        *Styles
 }
 
-func New(commands []string) *model {
+func New(commands []string, aliases core.AliasIndex) *model {
 	styles := DefaultStyles()
 	userInput := textinput.New()
 	userInput.Placeholder = "_"
@@ -51,6 +52,7 @@ func New(commands []string) *model {
 	m := &model{
 		history:   commands,
 		commands:  commands,
+		aliases:   aliases,
 		userInput: userInput,
 		styles:    styles,
 	}
@@ -115,13 +117,13 @@ func (m model) selectedCommand() string {
 	return m.commands[m.selectedIndex]
 }
 
-func shellCommand(command string) *exec.Cmd {
+func shellCommand(command string, aliases core.AliasIndex) *exec.Cmd {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
 	}
 
-	cmd := exec.Command(shell, "-lc", command)
+	cmd := exec.Command(shell, "-lc", core.ExpandAliasCommand(command, aliases))
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -149,7 +151,7 @@ func filterSelfInvocations(commands []string) []string {
 }
 
 func (m *model) refreshCommands() {
-	scored := core.GetFuzzyScoreList(m.history, m.userInput.Value())
+	scored := core.GetFuzzyScoreList(m.history, m.userInput.Value(), m.aliases)
 
 	m.commands = m.commands[:0]
 	for _, s := range scored {
@@ -215,7 +217,7 @@ func main() {
 		return
 	}
 
-	m := New(filterSelfInvocations(history))
+	m := New(filterSelfInvocations(history), core.LoadAliases())
 
 	f, err := tea.LogToFile("debug.log", "debug")
 	if err != nil {
@@ -230,7 +232,7 @@ func main() {
 	}
 
 	if m, ok := finalModel.(model); ok && m.executed != "" {
-		if err := shellCommand(m.executed).Run(); err != nil {
+		if err := shellCommand(m.executed, m.aliases).Run(); err != nil {
 			var exitErr *exec.ExitError
 			if errors.As(err, &exitErr) {
 				os.Exit(exitErr.ExitCode())

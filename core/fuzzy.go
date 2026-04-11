@@ -67,7 +67,64 @@ func normalizeCommandKey(s string) string {
 	return s
 }
 
-func GetFuzzyScoreList(commandHistory []string, query string) []ScoredCommand {
+func commandVariants(command string, aliases AliasIndex) []string {
+	command = strings.Join(strings.Fields(strings.TrimSpace(command)), " ")
+	if command == "" {
+		return nil
+	}
+
+	variants := []string{command}
+	fields := strings.Fields(command)
+	if len(fields) == 0 {
+		return variants
+	}
+
+	rest := ""
+	if len(fields) > 1 {
+		rest = " " + strings.Join(fields[1:], " ")
+	}
+
+	first := fields[0]
+	if expanded, ok := aliases.ByAlias[first]; ok {
+		variants = append(variants, expanded+rest)
+	}
+
+	for _, alias := range aliases.ByCommand[first] {
+		variants = append(variants, alias+rest)
+	}
+
+	return dedupeStrings(variants)
+}
+
+func dedupeStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+
+	return out
+}
+
+func bestCommandScore(query, command string, aliases AliasIndex) int {
+	best := -1
+
+	for _, variant := range commandVariants(command, aliases) {
+		score := FuzzyScore(query, variant)
+		if score > best {
+			best = score
+		}
+	}
+
+	return best
+}
+
+func GetFuzzyScoreList(commandHistory []string, query string, aliases AliasIndex) []ScoredCommand {
 	query = strings.TrimSpace(query)
 
 	bestByCommand := make(map[string]ScoredCommand, len(commandHistory))
@@ -75,7 +132,7 @@ func GetFuzzyScoreList(commandHistory []string, query string) []ScoredCommand {
 	for i, cmd := range commandHistory {
 		score := 0
 		if query != "" {
-			score = FuzzyScore(query, cmd)
+			score = bestCommandScore(query, cmd, aliases)
 			if score < 0 {
 				continue
 			}
