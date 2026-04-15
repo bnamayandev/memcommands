@@ -2,9 +2,11 @@ package core
 
 import (
 	"bufio"
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -13,34 +15,102 @@ import (
 
 func GetHistoryLines() ([]string, error) {
 	shellPath := os.Getenv("SHELL")
+	shellName := filepath.Base(shellPath)
 	home := os.Getenv("HOME")
 
 	if home == "" {
 		return nil, errors.New("HOME environment variable is not set")
 	}
 
-	historyFiles, err := historyCandidates(home, filepath.Base(shellPath), os.Getenv("HISTFILE"))
+	historyList, err := readInteractiveShellHistory(shellPath)
 	if err != nil {
 		return nil, err
 	}
 
-	historyList := make([]string, 0, 1024)
-
-	for _, historyFile := range historyFiles {
-		lines, err := readHistoryFile(historyFile.path, historyFile.format)
+	if len(historyList) == 0 {
+		historyFiles, err := historyCandidates(home, shellName, os.Getenv("HISTFILE"))
 		if err != nil {
 			return nil, err
 		}
-		historyList = append(historyList, lines...)
+
+		historyList, err = readFirstAvailableHistory(historyFiles)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	historyList = dedupeKeepLast(historyList)
 
 	if len(historyList) == 0 {
-		return nil, fmt.Errorf("no readable history entries found for shell %q", filepath.Base(shellPath))
+		return nil, fmt.Errorf("no readable history entries found for shell %q", shellName)
 	}
 
 	return historyList, nil
+}
+
+func readInteractiveShellHistory(shellPath string) ([]string, error) {
+	shellName := filepath.Base(shellPath)
+	if shellPath == "" {
+		return nil, nil
+	}
+
+	command := shellHistoryCommand(shellName)
+	if command == "" {
+		return nil, nil
+	}
+
+	cmd := exec.Command(shellPath, "-ic", command)
+	output, err := cmd.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("failed to read interactive %s history: %w", shellName, err)
+	}
+
+	scanner := bufio.NewScanner(bytes.NewReader(output))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	lines := make([]string, 0, 512)
+	for scanner.Scan() {
+		line := normalizeHistoryLine(scanner.Text(), shellName)
+		if line == "" {
+			continue
+		}
+		lines = append(lines, line)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("failed while reading interactive %s history: %w", shellName, err)
+	}
+
+	return lines, nil
+}
+
+func shellHistoryCommand(shellName string) string {
+	switch shellName {
+	case "zsh":
+		return "fc -ln 1"
+	case "bash":
+		return "HISTTIMEFORMAT= history"
+	default:
+		return ""
+	}
+}
+
+func readFirstAvailableHistory(historyFiles []historyFile) ([]string, error) {
+	for _, historyFile := range historyFiles {
+		lines, err := readHistoryFile(historyFile.path, historyFile.format)
+		if err != nil {
+			return nil, err
+		}
+		if len(lines) > 0 {
+			return lines, nil
+		}
+	}
+
+	return nil, nil
 }
 
 func dedupeKeepLast(lines []string) []string {
@@ -206,8 +276,31 @@ func normalizeHistoryLine(line, format string) string {
 				return ""
 			}
 		}
+		line = strings.TrimSpace(stripLeadingHistoryNumber(line))
 	}
 
 	line = strings.Join(strings.Fields(line), " ")
 	return strings.TrimSpace(line)
+}
+
+func stripLeadingHistoryNumber(line string) string {
+	line = strings.TrimLeft(line, " \t")
+	if line == "" || line[0] < '0' || line[0] > '9' {
+		return line
+	}
+
+	i := 0
+	for i < len(line) && line[i] >= '0' && line[i] <= '9' {
+		i++
+	}
+
+	if i >= len(line) || (line[i] != ' ' && line[i] != '\t') {
+		return line
+	}
+
+	for i < len(line) && (line[i] == ' ' || line[i] == '\t') {
+		i++
+	}
+
+	return line[i:]
 }
