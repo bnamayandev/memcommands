@@ -3,8 +3,8 @@ package main
 import (
 	"testing"
 
-	"memcommands/core"
 	tea "github.com/charmbracelet/bubbletea"
+	"memcommands/core"
 )
 
 func keys(m model, ss ...string) model {
@@ -28,8 +28,6 @@ func keys(m model, ss ...string) model {
 	return m
 }
 
-// Commands come back in reverse-chronological order, so index 0 is the
-// last item passed in.
 func newModel() model {
 	return *New([]string{"git status", "go build ./..."}, core.AliasIndex{})
 }
@@ -52,7 +50,6 @@ func TestCtrlJFocusesResults(t *testing.T) {
 }
 
 func TestInsertEdit(t *testing.T) {
-	// focus results, A to append at end, type " -v", run
 	m := keys(newModel(), "ctrl+j", "A", "space", "-", "v", "enter")
 	if m.executed != "go build ./... -v" {
 		t.Fatalf("want edited command, got %q", m.executed)
@@ -67,14 +64,13 @@ func TestDeleteWholeLineAndRetype(t *testing.T) {
 }
 
 func TestXDeletesChar(t *testing.T) {
-	m := keys(newModel(), "ctrl+j", "x") // delete 'g'
+	m := keys(newModel(), "ctrl+j", "x")
 	if string(m.editBuffer) != "o build ./..." {
 		t.Fatalf("want 'o build ./...', got %q", string(m.editBuffer))
 	}
 }
 
 func TestWordMotionThenDeleteWord(t *testing.T) {
-	// dw at start deletes "go " leaving "build ./..."
 	m := keys(newModel(), "ctrl+j", "d", "w")
 	if string(m.editBuffer) != "build ./..." {
 		t.Fatalf("want 'build ./...', got %q", string(m.editBuffer))
@@ -82,7 +78,7 @@ func TestWordMotionThenDeleteWord(t *testing.T) {
 }
 
 func TestNavigateReloadsBuffer(t *testing.T) {
-	m := keys(newModel(), "ctrl+j", "x", "j") // edit then move down
+	m := keys(newModel(), "ctrl+j", "x", "j")
 	if string(m.editBuffer) != "git status" {
 		t.Fatalf("buffer should reload on navigate, got %q", string(m.editBuffer))
 	}
