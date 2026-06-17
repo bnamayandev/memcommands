@@ -22,18 +22,18 @@ func GetHistoryLines() ([]string, error) {
 		return nil, errors.New("HOME environment variable is not set")
 	}
 
-	historyList, err := readInteractiveShellHistory(shellPath)
+	historyFiles, err := historyCandidates(home, shellName, os.Getenv("HISTFILE"))
+	if err != nil {
+		return nil, err
+	}
+
+	historyList, err := readFirstAvailableHistory(historyFiles)
 	if err != nil {
 		return nil, err
 	}
 
 	if len(historyList) == 0 {
-		historyFiles, err := historyCandidates(home, shellName, os.Getenv("HISTFILE"))
-		if err != nil {
-			return nil, err
-		}
-
-		historyList, err = readFirstAvailableHistory(historyFiles)
+		historyList, err = readInteractiveShellHistory(shellPath)
 		if err != nil {
 			return nil, err
 		}
@@ -91,7 +91,7 @@ func readInteractiveShellHistory(shellPath string) ([]string, error) {
 func shellHistoryCommand(shellName string) string {
 	switch shellName {
 	case "zsh":
-		return "fc -ln 1"
+		return "fc -R; fc -ln 1"
 	case "bash":
 		return "HISTTIMEFORMAT= history"
 	default:
