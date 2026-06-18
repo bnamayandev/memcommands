@@ -30,6 +30,7 @@ type Styles struct {
 	index         lipgloss.Style
 	selectedRow   lipgloss.Style
 	cursor        lipgloss.Style
+	cursorBar     lipgloss.Style
 	hints         lipgloss.Style
 	modeSearch    lipgloss.Style
 	modeNormal    lipgloss.Style
@@ -54,6 +55,7 @@ func DefaultStyles() *Styles {
 			Foreground(lipgloss.Color(colText)).
 			Bold(true),
 		cursor:     lipgloss.NewStyle().Reverse(true),
+		cursorBar:  lipgloss.NewStyle().Underline(true),
 		hints:      lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0)),
 		modeSearch: badge.Background(lipgloss.Color(colBlue)),
 		modeNormal: badge.Background(lipgloss.Color(colGreen)),
@@ -130,6 +132,21 @@ func (m model) renderIndexedCommands(width int) string {
 }
 
 func (m model) renderEditLine() string {
+	if m.mode == modeInsert {
+		var b strings.Builder
+		for i, r := range m.editBuffer {
+			if i == m.cursor {
+				b.WriteString(m.styles.cursorBar.Render(string(r)))
+			} else {
+				b.WriteRune(r)
+			}
+		}
+		if m.cursor >= len(m.editBuffer) {
+			b.WriteString(m.styles.cursorBar.Render(" "))
+		}
+		return b.String()
+	}
+
 	var b strings.Builder
 	for i, r := range m.editBuffer {
 		if i == m.cursor {

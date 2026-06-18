@@ -1,3 +1,4 @@
+// this file exists to make it so that we can support whatever aliases the user has set up
 package core
 
 import (

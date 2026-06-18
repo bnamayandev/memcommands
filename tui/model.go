@@ -42,6 +42,7 @@ type model struct {
 	editBuffer []rune
 	cursor     int
 	pending    string
+	count      string
 }
 
 func New(commands []string, aliases core.AliasIndex) *model {
@@ -128,6 +129,7 @@ func (m *model) enterResults() {
 	m.focus = focusResults
 	m.mode = modeNormal
 	m.pending = ""
+	m.count = ""
 	m.userInput.Blur()
 
 	if m.selectedIndex >= len(m.commands) {
@@ -157,6 +159,7 @@ func (m *model) leaveResults() {
 	m.focus = focusSearch
 	m.mode = modeNormal
 	m.pending = ""
+	m.count = ""
 	m.userInput.Focus()
 }
 

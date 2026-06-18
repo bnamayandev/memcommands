@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/atotto/clipboard"
@@ -55,23 +56,28 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.applyOperator(key), nil
 	}
 
+	// A leading non-zero digit (or any digit once a count is in progress)
+	// builds up a numeric count for the next motion, like in vim.
+	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' || (key == "0" && m.count != "") {
+		m.count += key
+		return m, nil
+	}
+
+	count := m.takeCount()
+
 	switch key {
 	case "esc":
 		m.leaveResults()
 	case "enter":
 		return m.run(string(m.editBuffer))
 	case "j", "ctrl+j", "ctrl+n":
-		if m.selectedIndex < len(m.commands)-1 {
-			m.selectedIndex++
-			m.ensureVisible()
-			m.loadEditBuffer()
-		}
+		m.selectedIndex = max(0, min(m.selectedIndex+count, len(m.commands)-1))
+		m.ensureVisible()
+		m.loadEditBuffer()
 	case "k", "ctrl+k", "ctrl+p":
-		if m.selectedIndex > 0 {
-			m.selectedIndex--
-			m.ensureVisible()
-			m.loadEditBuffer()
-		}
+		m.selectedIndex = max(m.selectedIndex-count, 0)
+		m.ensureVisible()
+		m.loadEditBuffer()
 	case "ctrl+d":
 		m.selectedIndex = min(m.selectedIndex+maxResults, len(m.commands)-1)
 		m.ensureVisible()
@@ -124,6 +130,18 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.paste(false)
 	}
 	return m, nil
+}
+
+// takeCount consumes the pending numeric count, returning at least 1.
+func (m *model) takeCount() int {
+	n := 1
+	if m.count != "" {
+		if v, err := strconv.Atoi(m.count); err == nil && v > 0 {
+			n = v
+		}
+		m.count = ""
+	}
+	return n
 }
 
 func (m model) applyOperator(key string) model {
