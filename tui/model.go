@@ -43,6 +43,7 @@ type model struct {
 	cursor     int
 	pending    string
 	count      string
+	gPending   bool
 }
 
 func New(commands []string, aliases core.AliasIndex) *model {
@@ -130,6 +131,7 @@ func (m *model) enterResults() {
 	m.mode = modeNormal
 	m.pending = ""
 	m.count = ""
+	m.gPending = false
 	m.userInput.Blur()
 
 	if m.selectedIndex >= len(m.commands) {
@@ -160,6 +162,7 @@ func (m *model) leaveResults() {
 	m.mode = modeNormal
 	m.pending = ""
 	m.count = ""
+	m.gPending = false
 	m.userInput.Focus()
 }
 

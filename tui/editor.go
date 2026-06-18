@@ -56,6 +56,21 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.applyOperator(key), nil
 	}
 
+	// Resolve a pending `g` (the first key of a `gg` sequence). `gg` jumps to
+	// the top, or to the count-th line (1-indexed) when a count was given.
+	if m.gPending {
+		m.gPending = false
+		if key == "g" {
+			target := 0
+			if m.count != "" {
+				target = m.takeCount() - 1
+			}
+			m.setSelection(target)
+		}
+		m.count = ""
+		return m, nil
+	}
+
 	// A leading non-zero digit (or any digit once a count is in progress)
 	// builds up a numeric count for the next motion, like in vim.
 	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' || (key == "0" && m.count != "") {
@@ -63,29 +78,34 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if key == "g" {
+		m.gPending = true
+		return m, nil
+	}
+
+	hasCount := m.count != ""
 	count := m.takeCount()
 
 	switch key {
 	case "esc":
 		m.leaveResults()
+	case "G":
+		// Jump to the last line, or to the count-th line when given.
+		target := len(m.commands) - 1
+		if hasCount {
+			target = count - 1
+		}
+		m.setSelection(target)
 	case "enter":
 		return m.run(string(m.editBuffer))
 	case "j", "ctrl+j", "ctrl+n":
-		m.selectedIndex = max(0, min(m.selectedIndex+count, len(m.commands)-1))
-		m.ensureVisible()
-		m.loadEditBuffer()
+		m.setSelection(m.selectedIndex + count)
 	case "k", "ctrl+k", "ctrl+p":
-		m.selectedIndex = max(m.selectedIndex-count, 0)
-		m.ensureVisible()
-		m.loadEditBuffer()
+		m.setSelection(m.selectedIndex - count)
 	case "ctrl+d":
-		m.selectedIndex = min(m.selectedIndex+maxResults, len(m.commands)-1)
-		m.ensureVisible()
-		m.loadEditBuffer()
+		m.setSelection(m.selectedIndex + maxResults)
 	case "ctrl+u":
-		m.selectedIndex = max(m.selectedIndex-maxResults, 0)
-		m.ensureVisible()
-		m.loadEditBuffer()
+		m.setSelection(m.selectedIndex - maxResults)
 	case "h":
 		m.cursor--
 		m.clampCursor()
@@ -130,6 +150,17 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.paste(false)
 	}
 	return m, nil
+}
+
+// setSelection moves the highlighted row to i, clamped to the list bounds,
+// and keeps it visible while reloading the edit buffer for the new command.
+func (m *model) setSelection(i int) {
+	if len(m.commands) == 0 {
+		return
+	}
+	m.selectedIndex = max(0, min(i, len(m.commands)-1))
+	m.ensureVisible()
+	m.loadEditBuffer()
 }
 
 // takeCount consumes the pending numeric count, returning at least 1.
