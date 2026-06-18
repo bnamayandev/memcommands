@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 const maxResults = 10
@@ -45,7 +46,11 @@ type model struct {
 
 func New(commands []string, aliases core.AliasIndex) *model {
 	input := textinput.New()
-	input.Placeholder = "_"
+	input.Placeholder = "search history…"
+	input.Prompt = "❯ "
+	input.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(colBlue))
+	input.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0))
+	input.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(colBlue))
 	input.Focus()
 
 	m := &model{
@@ -70,12 +75,18 @@ func (m model) contentWidth() int {
 	return max(0, m.width-2)
 }
 
+// innerWidth is the text width available inside a bordered block once the
+// horizontal padding is subtracted.
+func (m model) innerWidth() int {
+	return max(0, m.contentWidth()-2*hPad)
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.userInput.Width = max(0, m.contentWidth()-1)
+		m.userInput.Width = max(0, m.innerWidth()-3)
 		return m, nil
 	case tea.KeyMsg:
 		if m.focus == focusSearch {

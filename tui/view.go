@@ -8,30 +8,62 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
+// Catppuccin Mocha palette.
+const (
+	colBase     = "#1E1E2E"
+	colSurface0 = "#313244"
+	colSurface1 = "#45475A"
+	colOverlay0 = "#6C7086"
+	colText     = "#CDD6F4"
+	colBlue     = "#89B4FA"
+	colGreen    = "#A6E3A1"
+	colMauve    = "#CBA6F7"
+)
+
+// hPad is the horizontal padding inside each bordered block.
+const hPad = 1
+
 type Styles struct {
 	FocusedBorder lipgloss.Color
 	BlurredBorder lipgloss.Color
-	userInput     lipgloss.Style
-	results       lipgloss.Style
+	block         lipgloss.Style
+	index         lipgloss.Style
 	selectedRow   lipgloss.Style
 	cursor        lipgloss.Style
-	status        lipgloss.Style
+	hints         lipgloss.Style
+	modeSearch    lipgloss.Style
+	modeNormal    lipgloss.Style
+	modeInsert    lipgloss.Style
 }
 
 func DefaultStyles() *Styles {
+	badge := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(colBase)).
+		Bold(true).
+		Padding(0, 1)
+
 	return &Styles{
-		FocusedBorder: lipgloss.Color("#89B4FA"),
-		BlurredBorder: lipgloss.Color("#45475A"),
-		userInput:     lipgloss.NewStyle().BorderStyle(lipgloss.NormalBorder()),
-		results:       lipgloss.NewStyle().BorderStyle(lipgloss.NormalBorder()),
-		selectedRow:   lipgloss.NewStyle().Background(lipgloss.Color("#313244")).Bold(true),
-		cursor:        lipgloss.NewStyle().Reverse(true),
-		status:        lipgloss.NewStyle().Foreground(lipgloss.Color("#6C7086")),
+		FocusedBorder: lipgloss.Color(colBlue),
+		BlurredBorder: lipgloss.Color(colSurface1),
+		block: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			Padding(0, hPad),
+		index: lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0)),
+		selectedRow: lipgloss.NewStyle().
+			Background(lipgloss.Color(colSurface0)).
+			Foreground(lipgloss.Color(colText)).
+			Bold(true),
+		cursor:     lipgloss.NewStyle().Reverse(true),
+		hints:      lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0)),
+		modeSearch: badge.Background(lipgloss.Color(colBlue)),
+		modeNormal: badge.Background(lipgloss.Color(colGreen)),
+		modeInsert: badge.Background(lipgloss.Color(colMauve)),
 	}
 }
 
 func (m model) View() string {
 	contentWidth := m.contentWidth()
+	innerWidth := m.innerWidth()
 
 	searchBorder := m.styles.BlurredBorder
 	resultsBorder := m.styles.BlurredBorder
@@ -41,27 +73,29 @@ func (m model) View() string {
 		resultsBorder = m.styles.FocusedBorder
 	}
 
-	searchBlock := m.styles.userInput.
+	searchBlock := m.styles.block.
 		BorderForeground(searchBorder).
 		Width(contentWidth).
 		Render(m.userInput.View())
 
-	resultsBlock := m.styles.results.
+	resultsBlock := m.styles.block.
 		BorderForeground(resultsBorder).
 		Width(contentWidth).
-		Render(m.renderIndexedCommands(contentWidth))
-
-	status := ansi.Truncate(m.statusLine(), m.width, "…")
+		Render(m.renderIndexedCommands(innerWidth))
 
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		searchBlock,
 		resultsBlock,
-		m.styles.status.Render(status),
+		m.statusBar(),
 	)
 }
 
 func (m model) renderIndexedCommands(width int) string {
+	if len(m.commands) == 0 {
+		return m.styles.index.Render("  no matching commands")
+	}
+
 	start := m.scrollOffset
 	end := min(start+maxResults, len(m.commands))
 	lines := make([]string, 0, end-start)
@@ -75,20 +109,20 @@ func (m model) renderIndexedCommands(width int) string {
 			text = m.renderEditLine()
 		}
 
-		prefix := "  "
 		if selected {
-			prefix = "> "
+			// The whole row gets a single uniform style so the highlight
+			// fills the block and there are no color gaps.
+			line := fmt.Sprintf("❯ %2d %s", i+1, text)
+			if width > 0 {
+				line = ansi.Truncate(line, width, "…")
+			}
+			lines = append(lines, m.styles.selectedRow.Width(width).Render(line))
+			continue
 		}
-		line := fmt.Sprintf("%s%d. %s", prefix, i+1, text)
 
-		// Keep each row within the terminal width so long commands
-		// truncate instead of wrapping and breaking the layout.
+		line := m.styles.index.Render(fmt.Sprintf("  %2d ", i+1)) + text
 		if width > 0 {
 			line = ansi.Truncate(line, width, "…")
-		}
-
-		if editing {
-			line = m.styles.selectedRow.Render(line)
 		}
 		lines = append(lines, line)
 	}
@@ -110,13 +144,20 @@ func (m model) renderEditLine() string {
 	return b.String()
 }
 
-func (m model) statusLine() string {
+func (m model) statusBar() string {
+	var badge, hints string
 	switch {
 	case m.focus == focusSearch:
-		return "SEARCH  enter: run top result   ctrl+j/n: focus results"
+		badge = m.styles.modeSearch.Render("SEARCH")
+		hints = "enter run · ctrl+j/n focus results"
 	case m.mode == modeInsert:
-		return "-- INSERT --  esc: normal   enter: run"
+		badge = m.styles.modeInsert.Render("INSERT")
+		hints = "esc normal · enter run"
 	default:
-		return "NORMAL  j/k: move  ctrl+d/u: page  h/l 0 $ w b: cursor  i/a: edit  x dd dw cw: delete  yy/y$: yank  p: paste  enter: run  esc: search"
+		badge = m.styles.modeNormal.Render("NORMAL")
+		hints = "j/k move · ctrl+d/u page · h/l 0 $ w b cursor · i/a edit · x dd dw cw del · yy/y$ yank · p paste · enter run · esc search"
 	}
+
+	bar := badge + " " + m.styles.hints.Render(hints)
+	return ansi.Truncate(bar, m.width, "…")
 }
