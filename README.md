@@ -1,4 +1,4 @@
-# vimcommands
+# vimcommands ⌨️
 
 A "keep it super simple" terminal UI for browsing, editing, and re-running your
 shell history — with Vim keybindings.
@@ -8,22 +8,22 @@ Instead of squinting at `Ctrl-R` or scrolling endlessly through `history`,
 the one you want, tweak it in place with the Vim motions you already know, hit
 `Enter`, and it runs in your shell.
 
-## What it does
+## ✨ What it does
 
-- **Reads your real history.** Works with `zsh`, `bash`, and `fish` — it finds
+- 📜 **Reads your real history.** Works with `zsh`, `bash`, and `fish` — it finds
   the right history file automatically (honoring `$HISTFILE`), and falls back to
   asking your shell directly if needed. Entries are normalized and de-duplicated
   so you see each command once, most-recent-first.
-- **Fuzzy search.** Start typing to filter the list down. Matching is
+- 🔍 **Fuzzy search.** Start typing to filter the list down. Matching is
   alias-aware: searching for a command also turns up its aliases (and the other
   way around).
-- **Edit before you run.** Highlight a command and modify it with Vim
+- ✏️ **Edit before you run.** Highlight a command and modify it with Vim
   keybindings — change a flag, fix a path, swap an argument — without retyping
   the whole line.
-- **Alias expansion.** Your shell aliases are loaded and expanded when the
+- 🔗 **Alias expansion.** Your shell aliases are loaded and expanded when the
   command is executed, so what runs matches what you'd get in your normal shell.
 
-## Install
+## 📦 Install
 
 ```sh
 go build -o bin/cli ./tui
@@ -37,11 +37,11 @@ Then run the binary:
 
 (Drop it somewhere on your `$PATH` to call it from anywhere.)
 
-## Usage
+## 🚀 Usage
 
 Launch it and you land in the **search** box. Type to filter your history.
 
-### Search
+### 🔎 Search
 
 | Key | Action |
 | --- | --- |
@@ -50,7 +50,7 @@ Launch it and you land in the **search** box. Type to filter your history.
 | `Ctrl-j` / `Ctrl-n` / `Ctrl-k` / `Ctrl-p` | Drop into the results list |
 | `Ctrl-c` | Quit |
 
-### Results (Normal mode)
+### 📋 Results (Normal mode)
 
 Once you're in the list, you're in Vim **normal mode** on the selected command.
 
@@ -69,11 +69,11 @@ Once you're in the list, you're in Vim **normal mode** on the selected command.
 | `Esc` | Back to search |
 | `Ctrl-c` | Quit |
 
-### Insert mode
+### ⌨️ Insert mode
 
 Type normally. `Esc` returns to normal mode, `Enter` runs the command.
 
-## How it works
+## ⚙️ How it works
 
 `vimcommands` is a small [Bubble Tea](https://github.com/charmbracelet/bubbletea)
 app:
@@ -86,6 +86,6 @@ app:
 Your own invocations of `vimcommands` are filtered out of the list, so it
 doesn't clutter its own history.
 
-## License
+## 📄 License
 
 See repository.
