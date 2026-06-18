@@ -44,6 +44,13 @@ type model struct {
 	pending    string
 	count      string
 	gPending   bool
+
+	// aliasing overlays a floating box that captures a user-defined alias for
+	// the selected command. userAliases is the alias→command map we persist.
+	aliasing    bool
+	aliasInput  textinput.Model
+	aliasTarget string
+	userAliases map[string]string
 }
 
 func New(commands []string, aliases core.AliasIndex) *model {
@@ -55,13 +62,25 @@ func New(commands []string, aliases core.AliasIndex) *model {
 	input.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(colBlue))
 	input.Focus()
 
+	aliasInput := textinput.New()
+	aliasInput.Placeholder = "alias name…"
+	aliasInput.Prompt = "❯ "
+	aliasInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(colMauve))
+	aliasInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0))
+	aliasInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(colMauve))
+
+	userAliases := core.LoadUserAliases()
+	aliases.ByFullCommand = core.BuildUserAliasIndex(userAliases)
+
 	m := &model{
-		history:   commands,
-		commands:  commands,
-		aliases:   aliases,
-		userInput: input,
-		styles:    DefaultStyles(),
-		focus:     focusSearch,
+		history:     commands,
+		commands:    commands,
+		aliases:     aliases,
+		userInput:   input,
+		aliasInput:  aliasInput,
+		userAliases: userAliases,
+		styles:      DefaultStyles(),
+		focus:       focusSearch,
 	}
 	m.refreshCommands()
 	return m
@@ -89,8 +108,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.userInput.Width = max(0, m.innerWidth()-3)
+		m.aliasInput.Width = max(0, min(m.innerWidth(), aliasBoxWidth-4))
 		return m, nil
 	case tea.KeyMsg:
+		if m.aliasing {
+			return m.updateAlias(msg)
+		}
 		if m.focus == focusSearch {
 			return m.updateSearch(msg)
 		}

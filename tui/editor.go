@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"memcommands/core"
 	"strconv"
 	"strings"
 
@@ -21,6 +22,47 @@ func (m model) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateInsert(msg)
 	}
 	return m.updateNormal(msg)
+}
+
+// updateAlias drives the floating alias box: every key feeds the input except
+// enter (save) and esc (cancel).
+func (m model) updateAlias(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m.quit()
+	case "esc":
+		m.closeAlias()
+		return m, nil
+	case "enter":
+		m.saveAlias()
+		return m, nil
+	}
+
+	var cmd tea.Cmd
+	m.aliasInput, cmd = m.aliasInput.Update(msg)
+	return m, cmd
+}
+
+// saveAlias persists the typed alias for the targeted command and rebuilds the
+// search index so it can be found immediately.
+func (m *model) saveAlias() {
+	alias := strings.TrimSpace(m.aliasInput.Value())
+	target := strings.Join(strings.Fields(strings.TrimSpace(m.aliasTarget)), " ")
+	if alias != "" && target != "" {
+		if m.userAliases == nil {
+			m.userAliases = make(map[string]string)
+		}
+		m.userAliases[alias] = target
+		_ = core.SaveUserAliases(m.userAliases)
+		m.aliases.ByFullCommand = core.BuildUserAliasIndex(m.userAliases)
+		m.refreshCommands()
+	}
+	m.closeAlias()
+}
+
+func (m *model) closeAlias() {
+	m.aliasing = false
+	m.aliasInput.Blur()
 }
 
 func (m model) updateInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -141,6 +183,13 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.editBuffer) > 0 && m.cursor < len(m.editBuffer) {
 			m.editBuffer = append(m.editBuffer[:m.cursor], m.editBuffer[m.cursor+1:]...)
 			m.clampCursor()
+		}
+	case "m":
+		if m.selectedIndex >= 0 && m.selectedIndex < len(m.commands) {
+			m.aliasTarget = m.commands[m.selectedIndex]
+			m.aliasInput.SetValue("")
+			m.aliasing = true
+			return m, m.aliasInput.Focus()
 		}
 	case "d", "c", "y":
 		m.pending = key

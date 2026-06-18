@@ -17,6 +17,10 @@ the one you want, tweak it in place with the Vim motions you already know, hit
 - 🔍 **Fuzzy search.** Start typing to filter the list down. Matching is
   alias-aware: searching for a command also turns up its aliases (and the other
   way around).
+- 🏷️ **Name your own aliases.** Press `m` on any command to pop up a floating
+  box and give it a memorable label. Your aliases are saved to
+  `~/.config/memcommands/aliases.json` and become searchable — type the label
+  and the command surfaces.
 - ✏️ **Edit before you run.** Highlight a command and modify it with Vim
   keybindings — change a flag, fix a path, swap an argument — without retyping
   the whole line.
@@ -65,6 +69,7 @@ Once you're in the list, you're in Vim **normal mode** on the selected command.
 | `x` | Delete character under cursor |
 | `d` / `c` / `y` + motion | Delete / change / yank (e.g. `dw`, `d$`, `cc`, `yy`) |
 | `p` / `P` | Paste after / before cursor |
+| `m` | Open the floating box to alias the selected command |
 | `Enter` | Run the (possibly edited) command |
 | `Esc` | Back to search |
 | `Ctrl-c` | Quit |
@@ -80,6 +85,7 @@ app:
 
 - `core/get_history.go` — locates and parses shell history across zsh/bash/fish.
 - `core/aliases.go` — loads shell aliases and expands them at run time.
+- `core/user_aliases.go` — persists the aliases you create with `m`.
 - `core/fuzzy.go` — the fuzzy matcher behind search.
 - `tui/` — the interface: the model, view, and the Vim editor.
 

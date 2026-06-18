@@ -93,6 +93,12 @@ func commandVariants(command string, aliases AliasIndex) []string {
 		variants = append(variants, alias+rest)
 	}
 
+	// User-defined aliases label the whole command line, so they match as
+	// standalone search terms rather than as a command prefix.
+	for _, label := range aliases.ByFullCommand[normalizeCommandKey(command)] {
+		variants = append(variants, label)
+	}
+
 	return dedupeStrings(variants)
 }
 

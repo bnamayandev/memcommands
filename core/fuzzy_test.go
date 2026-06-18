@@ -129,3 +129,39 @@ func TestReadFirstAvailableHistoryUsesSingleChronologicalSource(t *testing.T) {
 		t.Fatalf("expected primary history ordering to be preserved, got %#v", lines)
 	}
 }
+
+func TestGetFuzzyScoreListMatchesUserAlias(t *testing.T) {
+	history := []string{`git commit -m "wip"`, "ls -la"}
+	aliases := AliasIndex{
+		ByFullCommand: BuildUserAliasIndex(map[string]string{
+			"gcm": `git commit -m "wip"`,
+		}),
+	}
+
+	scored := GetFuzzyScoreList(history, "gcm", aliases)
+	if len(scored) == 0 {
+		t.Fatalf("expected the aliased command to match, got none")
+	}
+	if scored[0].Command != `git commit -m "wip"` {
+		t.Fatalf("expected the original command to surface, got %q", scored[0].Command)
+	}
+}
+
+func TestUserAliasRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	in := map[string]string{"gcm": `git commit -m "wip"`}
+	if err := SaveUserAliases(in); err != nil {
+		t.Fatalf("save failed: %v", err)
+	}
+
+	out := LoadUserAliases()
+	if out["gcm"] != in["gcm"] {
+		t.Fatalf("round trip mismatch: got %q", out["gcm"])
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "memcommands", "aliases.json")); err != nil {
+		t.Fatalf("expected aliases file to exist: %v", err)
+	}
+}

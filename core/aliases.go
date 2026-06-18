@@ -11,18 +11,24 @@ import (
 type AliasIndex struct {
 	ByAlias   map[string]string
 	ByCommand map[string][]string
+	// ByFullCommand maps a normalized command line to the user-defined alias
+	// labels created from inside the TUI. These are search-only labels: they
+	// surface the underlying command but never change how it runs.
+	ByFullCommand map[string][]string
 }
 
 func LoadAliases() AliasIndex {
+	userIndex := BuildUserAliasIndex(LoadUserAliases())
+
 	shell := os.Getenv("SHELL")
 	if shell == "" {
-		return AliasIndex{}
+		return AliasIndex{ByFullCommand: userIndex}
 	}
 
 	cmd := exec.Command(shell, "-ic", "alias")
 	output, err := cmd.Output()
 	if err != nil {
-		return AliasIndex{}
+		return AliasIndex{ByFullCommand: userIndex}
 	}
 
 	byAlias := make(map[string]string)
@@ -55,8 +61,9 @@ func LoadAliases() AliasIndex {
 	}
 
 	return AliasIndex{
-		ByAlias:   byAlias,
-		ByCommand: byCommand,
+		ByAlias:       byAlias,
+		ByCommand:     byCommand,
+		ByFullCommand: userIndex,
 	}
 }
 
@@ -90,6 +97,12 @@ func containsString(values []string, target string) bool {
 		}
 	}
 	return false
+}
+
+// AliasesForCommand returns the user-defined alias labels attached to a
+// command, if any.
+func AliasesForCommand(command string, aliases AliasIndex) []string {
+	return aliases.ByFullCommand[normalizeCommandKey(command)]
 }
 
 func ExpandAliasCommand(command string, aliases AliasIndex) string {
