@@ -64,11 +64,18 @@ func (m model) Init() tea.Cmd {
 	return nil
 }
 
+// contentWidth is the inner width available inside the bordered blocks,
+// derived from the current terminal width (1 column per side for borders).
+func (m model) contentWidth() int {
+	return max(0, m.width-2)
+}
+
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+		m.userInput.Width = max(0, m.contentWidth()-1)
 		return m, nil
 	case tea.KeyMsg:
 		if m.focus == focusSearch {

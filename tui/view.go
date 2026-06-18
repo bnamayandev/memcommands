@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 type Styles struct {
@@ -30,7 +31,7 @@ func DefaultStyles() *Styles {
 }
 
 func (m model) View() string {
-	contentWidth := max(0, m.width-2)
+	contentWidth := m.contentWidth()
 
 	searchBorder := m.styles.BlurredBorder
 	resultsBorder := m.styles.BlurredBorder
@@ -48,17 +49,19 @@ func (m model) View() string {
 	resultsBlock := m.styles.results.
 		BorderForeground(resultsBorder).
 		Width(contentWidth).
-		Render(m.renderIndexedCommands())
+		Render(m.renderIndexedCommands(contentWidth))
+
+	status := ansi.Truncate(m.statusLine(), m.width, "…")
 
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
 		searchBlock,
 		resultsBlock,
-		m.styles.status.Render(m.statusLine()),
+		m.styles.status.Render(status),
 	)
 }
 
-func (m model) renderIndexedCommands() string {
+func (m model) renderIndexedCommands(width int) string {
 	start := m.scrollOffset
 	end := min(start+maxResults, len(m.commands))
 	lines := make([]string, 0, end-start)
@@ -77,6 +80,12 @@ func (m model) renderIndexedCommands() string {
 			prefix = "> "
 		}
 		line := fmt.Sprintf("%s%d. %s", prefix, i+1, text)
+
+		// Keep each row within the terminal width so long commands
+		// truncate instead of wrapping and breaking the layout.
+		if width > 0 {
+			line = ansi.Truncate(line, width, "…")
+		}
 
 		if editing {
 			line = m.styles.selectedRow.Render(line)
