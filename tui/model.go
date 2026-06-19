@@ -28,6 +28,7 @@ const (
 
 type model struct {
 	history       []string
+	corpus        *core.Corpus
 	commands      []string
 	aliases       core.AliasIndex
 	width         int
@@ -97,12 +98,24 @@ func New(commands []string, aliases core.AliasIndex) *model {
 		styles:      DefaultStyles(),
 		focus:       focusSearch,
 	}
+	m.corpus = core.NewCorpus(m.history, m.aliases)
 	m.refreshCommands()
 	return m
 }
 
+// aliasesLoadedMsg carries the shell aliases loaded async, so the interactive-shell spawn never blocks the first draw.
+type aliasesLoadedMsg struct {
+	byAlias   map[string]string
+	byCommand map[string][]string
+}
+
+func loadShellAliases() tea.Msg {
+	byAlias, byCommand := core.LoadShellAliases()
+	return aliasesLoadedMsg{byAlias: byAlias, byCommand: byCommand}
+}
+
 func (m model) Init() tea.Cmd {
-	return nil
+	return loadShellAliases
 }
 
 // contentWidth is the inner width available inside the bordered blocks,
@@ -123,6 +136,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.userInput.Width = max(0, m.innerWidth()-3)
+		return m, nil
+	case aliasesLoadedMsg:
+		m.aliases.ByAlias = msg.byAlias
+		m.aliases.ByCommand = msg.byCommand
+		m.corpus = core.NewCorpus(m.history, m.aliases)
+		m.refreshCommands()
 		return m, nil
 	case tea.KeyMsg:
 		if m.aliasing {
@@ -218,7 +237,7 @@ func (m *model) loadEditBuffer() {
 }
 
 func (m *model) refreshCommands() {
-	scored := core.GetFuzzyScoreList(m.history, m.userInput.Value(), m.aliases)
+	scored := m.corpus.Search(m.userInput.Value())
 
 	m.commands = m.commands[:0]
 	for _, s := range scored {

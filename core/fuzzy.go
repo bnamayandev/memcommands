@@ -145,10 +145,10 @@ func dedupeStrings(values []string) []string {
 	return out
 }
 
-func bestCommandScore(query, command string, aliases AliasIndex) int {
+func bestVariantScore(query string, variants []string) int {
 	best := -1
 
-	for _, variant := range commandVariants(command, aliases) {
+	for _, variant := range variants {
 		score := FuzzyScore(query, variant)
 		if score > best {
 			best = score
@@ -158,36 +158,71 @@ func bestCommandScore(query, command string, aliases AliasIndex) int {
 	return best
 }
 
-func GetFuzzyScoreList(commandHistory []string, query string, aliases AliasIndex) []ScoredCommand {
-	query = strings.TrimSpace(query)
+// corpusEntry is a history command with its match variants precomputed, so
+// search doesn't rebuild them on every keystroke.
+type corpusEntry struct {
+	command  string
+	index    int
+	variants []string
+}
 
-	bestByCommand := make(map[string]ScoredCommand, len(commandHistory))
+// Corpus is a search-ready, de-duplicated view of the history; rebuild only
+// when the alias index changes.
+type Corpus struct {
+	entries []corpusEntry
+}
+
+// NewCorpus de-duplicates the history (keeping the most recent occurrence) and
+// precomputes each entry's alias-aware match variants.
+func NewCorpus(commandHistory []string, aliases AliasIndex) *Corpus {
+	entries := make([]corpusEntry, 0, len(commandHistory))
+	posByKey := make(map[string]int, len(commandHistory))
 
 	for i, cmd := range commandHistory {
+		command := strings.Join(strings.Fields(strings.TrimSpace(cmd)), " ")
+		if command == "" {
+			continue
+		}
+
+		entry := corpusEntry{
+			command:  command,
+			index:    i,
+			variants: commandVariants(command, aliases),
+		}
+
+		key := normalizeCommandKey(command)
+		if pos, ok := posByKey[key]; ok {
+			// Keep the most recent occurrence (later = larger index = the recency tie-break).
+			entries[pos] = entry
+			continue
+		}
+		posByKey[key] = len(entries)
+		entries = append(entries, entry)
+	}
+
+	return &Corpus{entries: entries}
+}
+
+// Search returns matches ordered by score then recency; an empty query returns
+// everything, most-recent-first.
+func (c *Corpus) Search(query string) []ScoredCommand {
+	query = strings.TrimSpace(query)
+
+	out := make([]ScoredCommand, 0, len(c.entries))
+	for _, entry := range c.entries {
 		score := 0
 		if query != "" {
-			score = bestCommandScore(query, cmd, aliases)
+			score = bestVariantScore(query, entry.variants)
 			if score < 0 {
 				continue
 			}
 		}
 
-		key := normalizeCommandKey(cmd)
-		candidate := ScoredCommand{
+		out = append(out, ScoredCommand{
 			Score:   score,
-			Command: strings.Join(strings.Fields(strings.TrimSpace(cmd)), " "),
-			Index:   i,
-		}
-
-		existing, ok := bestByCommand[key]
-		if !ok || candidate.Score > existing.Score || (candidate.Score == existing.Score && candidate.Index > existing.Index) {
-			bestByCommand[key] = candidate
-		}
-	}
-
-	out := make([]ScoredCommand, 0, len(bestByCommand))
-	for _, scored := range bestByCommand {
-		out = append(out, scored)
+			Command: entry.command,
+			Index:   entry.index,
+		})
 	}
 
 	sort.Slice(out, func(i, j int) bool {
@@ -198,4 +233,10 @@ func GetFuzzyScoreList(commandHistory []string, query string, aliases AliasIndex
 	})
 
 	return out
+}
+
+// GetFuzzyScoreList builds a one-off corpus and searches it; the TUI uses a
+// persistent Corpus instead.
+func GetFuzzyScoreList(commandHistory []string, query string, aliases AliasIndex) []ScoredCommand {
+	return NewCorpus(commandHistory, aliases).Search(query)
 }

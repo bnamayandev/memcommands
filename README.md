@@ -30,8 +30,10 @@ the one you want, tweak it in place with the Vim motions you already know, hit
 ## 📦 Install
 
 ```sh
-go build -o bin/cli ./tui
+go build -ldflags="-s -w" -o bin/cli ./tui
 ```
+
+(`-ldflags="-s -w"` strips debug info for a smaller binary.)
 
 Then run the binary:
 

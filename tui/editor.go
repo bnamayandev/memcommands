@@ -144,6 +144,7 @@ func (m *model) saveAlias() bool {
 	m.userAliases[alias] = target
 	_ = core.SaveUserAliases(m.userAliases)
 	m.aliases.ByFullCommand = core.BuildUserAliasIndex(m.userAliases)
+	m.corpus = core.NewCorpus(m.history, m.aliases)
 	m.refreshCommands()
 	return true
 }

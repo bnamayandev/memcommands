@@ -17,22 +17,23 @@ type AliasIndex struct {
 	ByFullCommand map[string][]string
 }
 
-func LoadAliases() AliasIndex {
-	userIndex := BuildUserAliasIndex(LoadUserAliases())
+// LoadShellAliases lists the user's shell aliases via an interactive shell.
+// Kept separate so it can run async: the interactive shell sources the full rc
+// file, which is the slowest part of startup.
+func LoadShellAliases() (byAlias map[string]string, byCommand map[string][]string) {
+	byAlias = make(map[string]string)
+	byCommand = make(map[string][]string)
 
 	shell := os.Getenv("SHELL")
 	if shell == "" {
-		return AliasIndex{ByFullCommand: userIndex}
+		return byAlias, byCommand
 	}
 
 	cmd := exec.Command(shell, "-ic", "alias")
 	output, err := cmd.Output()
 	if err != nil {
-		return AliasIndex{ByFullCommand: userIndex}
+		return byAlias, byCommand
 	}
-
-	byAlias := make(map[string]string)
-	byCommand := make(map[string][]string)
 
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 	for scanner.Scan() {
@@ -60,11 +61,7 @@ func LoadAliases() AliasIndex {
 		}
 	}
 
-	return AliasIndex{
-		ByAlias:       byAlias,
-		ByCommand:     byCommand,
-		ByFullCommand: userIndex,
-	}
+	return byAlias, byCommand
 }
 
 func parseAliasLine(line string) (name, expansion string, ok bool) {

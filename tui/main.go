@@ -18,7 +18,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	m := New(filterSelfInvocations(history), core.LoadAliases())
+	// Shell aliases load async (see model.Init) so the UI draws immediately.
+	m := New(filterSelfInvocations(history), core.AliasIndex{})
 
 	f, err := tea.LogToFile("debug.log", "debug")
 	if err != nil {
