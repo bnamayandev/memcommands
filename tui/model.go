@@ -42,9 +42,10 @@ type model struct {
 	mode       vimMode
 	editBuffer []rune
 	cursor     int
-	pending    string
-	count      string
-	gPending   bool
+	pending      string
+	pendingCount int
+	count        string
+	gPending     bool
 	// visualAnchor is the fixed end of the selection while in visual mode; the
 	// other end follows the cursor.
 	visualAnchor int

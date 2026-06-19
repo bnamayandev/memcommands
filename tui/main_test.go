@@ -100,6 +100,49 @@ func TestWordMotionThenDeleteWord(t *testing.T) {
 	}
 }
 
+func TestCountMovesCursorRight(t *testing.T) {
+	m := keys(newModel(t), "ctrl+j", "3", "l")
+	if m.cursor != 3 {
+		t.Fatalf("want cursor 3, got %d", m.cursor)
+	}
+}
+
+func TestCountMovesCursorLeft(t *testing.T) {
+	m := keys(newModel(t), "ctrl+j", "$", "2", "h")
+	end := len("go build ./...") - 1
+	if m.cursor != end-2 {
+		t.Fatalf("want cursor %d, got %d", end-2, m.cursor)
+	}
+}
+
+func TestCountDeletesChars(t *testing.T) {
+	m := keys(newModel(t), "ctrl+j", "3", "x")
+	if string(m.editBuffer) != "build ./..." {
+		t.Fatalf("want 'build ./...', got %q", string(m.editBuffer))
+	}
+}
+
+func TestCountWordMotion(t *testing.T) {
+	m := keys(newModel(t), "ctrl+j", "2", "w")
+	if m.cursor != 9 {
+		t.Fatalf("want cursor 9 (start of './...'), got %d", m.cursor)
+	}
+}
+
+func TestCountBackWordMotion(t *testing.T) {
+	m := keys(newModel(t), "ctrl+j", "$", "2", "b")
+	if m.cursor != 3 {
+		t.Fatalf("want cursor 3 (start of 'build'), got %d", m.cursor)
+	}
+}
+
+func TestCountDeleteWords(t *testing.T) {
+	m := keys(newModel(t), "ctrl+j", "2", "d", "w")
+	if string(m.editBuffer) != "./..." {
+		t.Fatalf("want './...', got %q", string(m.editBuffer))
+	}
+}
+
 func TestNavigateReloadsBuffer(t *testing.T) {
 	m := keys(newModel(t), "ctrl+j", "x", "j")
 	if string(m.editBuffer) != "git status" {

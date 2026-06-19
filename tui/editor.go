@@ -45,17 +45,26 @@ func (m model) visualRange() (int, int) {
 }
 
 func (m model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
+	key := msg.String()
+
+	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' || (key == "0" && m.count != "") {
+		m.count += key
+		return m, nil
+	}
+
+	count := m.takeCount()
+
+	switch key {
 	case "esc":
 		m.mode = modeNormal
 		m.clampCursor()
 	case "enter":
 		return m.run(string(m.editBuffer))
 	case "h":
-		m.cursor--
+		m.cursor -= count
 		m.clampCursor()
 	case "l":
-		m.cursor++
+		m.cursor += count
 		m.clampCursor()
 	case "0":
 		m.cursor = 0
@@ -63,10 +72,14 @@ func (m model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor = len(m.editBuffer) - 1
 		m.clampCursor()
 	case "w":
-		m.cursor = nextWordStart(m.editBuffer, m.cursor)
+		for n := 0; n < count; n++ {
+			m.cursor = nextWordStart(m.editBuffer, m.cursor)
+		}
 		m.clampCursor()
 	case "b":
-		m.cursor = prevWordStart(m.editBuffer, m.cursor)
+		for n := 0; n < count; n++ {
+			m.cursor = prevWordStart(m.editBuffer, m.cursor)
+		}
 		m.clampCursor()
 	case "y":
 		start, end := m.visualRange()
@@ -225,10 +238,10 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+u":
 		m.setSelection(m.selectedIndex - maxResults)
 	case "h":
-		m.cursor--
+		m.cursor -= count
 		m.clampCursor()
 	case "l":
-		m.cursor++
+		m.cursor += count
 		m.clampCursor()
 	case "0":
 		m.cursor = 0
@@ -236,10 +249,14 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor = len(m.editBuffer) - 1
 		m.clampCursor()
 	case "w":
-		m.cursor = nextWordStart(m.editBuffer, m.cursor)
+		for n := 0; n < count; n++ {
+			m.cursor = nextWordStart(m.editBuffer, m.cursor)
+		}
 		m.clampCursor()
 	case "b":
-		m.cursor = prevWordStart(m.editBuffer, m.cursor)
+		for n := 0; n < count; n++ {
+			m.cursor = prevWordStart(m.editBuffer, m.cursor)
+		}
 		m.clampCursor()
 	case "i":
 		m.mode = modeInsert
@@ -256,8 +273,12 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeInsert
 		m.cursor = 0
 	case "x":
+		end := m.cursor + count
+		if end > len(m.editBuffer) {
+			end = len(m.editBuffer)
+		}
 		if len(m.editBuffer) > 0 && m.cursor < len(m.editBuffer) {
-			m.editBuffer = append(m.editBuffer[:m.cursor], m.editBuffer[m.cursor+1:]...)
+			m.editBuffer = append(m.editBuffer[:m.cursor], m.editBuffer[end:]...)
 			m.clampCursor()
 		}
 	case "m":
@@ -278,6 +299,7 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.clampCursor()
 	case "d", "c", "y":
 		m.pending = key
+		m.pendingCount = count
 	case "u":
 		m.undoDelete()
 	case "p":
@@ -313,7 +335,12 @@ func (m *model) takeCount() int {
 
 func (m model) applyOperator(key string) model {
 	op := m.pending
+	count := m.pendingCount
+	if count < 1 {
+		count = 1
+	}
 	m.pending = ""
+	m.pendingCount = 0
 
 	if op == "d" && key == "d" {
 		m.deleteSelected()
@@ -325,13 +352,19 @@ func (m model) applyOperator(key string) model {
 	case op:
 		start, end = 0, len(m.editBuffer)
 	case "w":
-		end = nextWordStart(m.editBuffer, m.cursor)
+		end = m.cursor
+		for n := 0; n < count; n++ {
+			end = nextWordStart(m.editBuffer, end)
+		}
 	case "$":
 		end = len(m.editBuffer)
 	case "0":
 		start = 0
 	case "b":
-		start = prevWordStart(m.editBuffer, m.cursor)
+		start = m.cursor
+		for n := 0; n < count; n++ {
+			start = prevWordStart(m.editBuffer, start)
+		}
 	default:
 		return m
 	}
