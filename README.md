@@ -1,7 +1,7 @@
 # vimcommands ⌨️
 
 A "keep it super simple" terminal UI for browsing, editing, and re-running your
-shell history — with Vim keybindings.
+shell history with Vim keybindings.
 
 Instead of squinting at `Ctrl-R` or scrolling endlessly through `history`,
 `vimcommands` drops you into a fuzzy-searchable list of your past commands. Find

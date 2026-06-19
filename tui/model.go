@@ -71,11 +71,11 @@ func New(commands []string, aliases core.AliasIndex) *model {
 	input.Focus()
 
 	aliasInput := textinput.New()
-	aliasInput.Placeholder = "alias name…"
-	aliasInput.Prompt = "❯ "
-	aliasInput.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(colMauve))
+	aliasInput.Placeholder = "type your alias..."
+	aliasInput.Prompt = ""
 	aliasInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0))
-	aliasInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(colMauve))
+	aliasInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(colGreen)).Italic(true)
+	aliasInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(colGreen))
 
 	userAliases := core.LoadUserAliases()
 	aliases.ByFullCommand = core.BuildUserAliasIndex(userAliases)
@@ -122,7 +122,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.userInput.Width = max(0, m.innerWidth()-3)
-		m.aliasInput.Width = max(0, min(m.innerWidth(), aliasBoxWidth-4))
 		return m, nil
 	case tea.KeyMsg:
 		if m.aliasing {
@@ -132,6 +131,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateSearch(msg)
 		}
 		return m.updateResults(msg)
+	}
+
+	if m.aliasing {
+		var cmd tea.Cmd
+		m.aliasInput, cmd = m.aliasInput.Update(msg)
+		return m, cmd
 	}
 
 	if m.focus == focusSearch {

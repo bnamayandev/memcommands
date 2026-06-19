@@ -26,9 +26,6 @@ const (
 // hPad is the horizontal padding inside each bordered block.
 const hPad = 1
 
-// aliasBoxWidth is the target width of the floating alias box.
-const aliasBoxWidth = 50
-
 type Styles struct {
 	FocusedBorder lipgloss.Color
 	BlurredBorder lipgloss.Color
@@ -80,10 +77,6 @@ func DefaultStyles() *Styles {
 }
 
 func (m model) View() string {
-	if m.aliasing {
-		return m.aliasView()
-	}
-
 	contentWidth := m.contentWidth()
 	innerWidth := m.innerWidth()
 
@@ -113,45 +106,6 @@ func (m model) View() string {
 	)
 }
 
-// aliasView renders the floating alias box centered over the terminal.
-func (m model) aliasView() string {
-	boxWidth := min(aliasBoxWidth, max(0, m.width-4))
-	inner := max(0, boxWidth-2*hPad)
-
-	title := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(colMauve)).
-		Bold(true).
-		Render("set alias")
-
-	target := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(colOverlay0)).
-		Render(ansi.Truncate(m.aliasTarget, inner, "…"))
-
-	hints := m.styles.hints.Render("enter save · esc cancel")
-	if m.aliasError != "" {
-		hints = lipgloss.NewStyle().
-			Foreground(lipgloss.Color(colRed)).
-			Render(m.aliasError)
-	}
-
-	content := lipgloss.JoinVertical(
-		lipgloss.Left,
-		title,
-		target,
-		"",
-		m.aliasInput.View(),
-		"",
-		hints,
-	)
-
-	box := m.styles.block.
-		BorderForeground(lipgloss.Color(colMauve)).
-		Width(boxWidth).
-		Render(content)
-
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, box)
-}
-
 func (m model) renderIndexedCommands(width int) string {
 	if len(m.commands) == 0 {
 		return m.styles.index.Render("  no matching commands")
@@ -165,7 +119,8 @@ func (m model) renderIndexedCommands(width int) string {
 
 	for i := start; i < end; i++ {
 		selected := i == m.selectedIndex
-		editing := selected && m.focus == focusResults
+		aliasing := selected && m.aliasing
+		editing := selected && m.focus == focusResults && !m.aliasing
 
 		var text string
 		if editing {
@@ -173,7 +128,11 @@ func (m model) renderIndexedCommands(width int) string {
 		} else {
 			text = highlightMatch(m.commands[i], core.MatchPositions(query, m.commands[i]), m.styles.match)
 		}
+
 		prefix := m.aliasPrefix(m.commands[i])
+		if aliasing {
+			prefix = m.aliasEditPrefix()
+		}
 
 		if selected {
 			// The whole row gets a single uniform style so the highlight
@@ -193,6 +152,10 @@ func (m model) renderIndexedCommands(width int) string {
 		lines = append(lines, line)
 	}
 	return strings.Join(lines, "\n")
+}
+
+func (m model) aliasEditPrefix() string {
+	return m.styles.alias.Render("<") + m.aliasInput.View() + m.styles.alias.Render(">") + " "
 }
 
 func (m model) aliasPrefix(command string) string {
@@ -273,6 +236,15 @@ func (m model) renderEditLine() string {
 }
 
 func (m model) statusBar() string {
+	if m.aliasing {
+		badge := m.styles.modeInsert.Render("ALIAS")
+		hints := m.styles.hints.Render("enter save · esc cancel")
+		if m.aliasError != "" {
+			hints = lipgloss.NewStyle().Foreground(lipgloss.Color(colRed)).Render(m.aliasError)
+		}
+		return ansi.Truncate(badge+" "+hints, m.width, "…")
+	}
+
 	var badge, hints string
 	switch {
 	case m.focus == focusSearch:
