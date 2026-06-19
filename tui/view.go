@@ -19,6 +19,8 @@ const (
 	colBlue     = "#89B4FA"
 	colGreen    = "#A6E3A1"
 	colMauve    = "#CBA6F7"
+	colPeach    = "#FAB387"
+	colRed      = "#F38BA8"
 )
 
 // hPad is the horizontal padding inside each bordered block.
@@ -37,6 +39,7 @@ type Styles struct {
 	cursorBar     lipgloss.Style
 	visual        lipgloss.Style
 	alias         lipgloss.Style
+	match         lipgloss.Style
 	hints         lipgloss.Style
 	modeSearch    lipgloss.Style
 	modeNormal    lipgloss.Style
@@ -67,6 +70,7 @@ func DefaultStyles() *Styles {
 			Background(lipgloss.Color(colBlue)).
 			Foreground(lipgloss.Color(colBase)),
 		alias:      lipgloss.NewStyle().Foreground(lipgloss.Color(colGreen)).Italic(true),
+		match:      lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach)).Bold(true),
 		hints:      lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0)),
 		modeSearch: badge.Background(lipgloss.Color(colBlue)),
 		modeNormal: badge.Background(lipgloss.Color(colGreen)),
@@ -124,6 +128,11 @@ func (m model) aliasView() string {
 		Render(ansi.Truncate(m.aliasTarget, inner, "…"))
 
 	hints := m.styles.hints.Render("enter save · esc cancel")
+	if m.aliasError != "" {
+		hints = lipgloss.NewStyle().
+			Foreground(lipgloss.Color(colRed)).
+			Render(m.aliasError)
+	}
 
 	content := lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -148,6 +157,8 @@ func (m model) renderIndexedCommands(width int) string {
 		return m.styles.index.Render("  no matching commands")
 	}
 
+	query := m.userInput.Value()
+
 	start := m.scrollOffset
 	end := min(start+maxResults, len(m.commands))
 	lines := make([]string, 0, end-start)
@@ -156,16 +167,18 @@ func (m model) renderIndexedCommands(width int) string {
 		selected := i == m.selectedIndex
 		editing := selected && m.focus == focusResults
 
-		text := m.commands[i]
+		var text string
 		if editing {
 			text = m.renderEditLine()
+		} else {
+			text = highlightMatch(m.commands[i], core.MatchPositions(query, m.commands[i]), m.styles.match)
 		}
-		suffix := m.aliasSuffix(m.commands[i])
+		prefix := m.aliasPrefix(m.commands[i])
 
 		if selected {
 			// The whole row gets a single uniform style so the highlight
 			// fills the block and there are no color gaps.
-			line := fmt.Sprintf("❯ %2d %s%s", i+1, text, suffix)
+			line := fmt.Sprintf("❯ %2d %s%s", i+1, prefix, text)
 			if width > 0 {
 				line = ansi.Truncate(line, width, "…")
 			}
@@ -173,7 +186,7 @@ func (m model) renderIndexedCommands(width int) string {
 			continue
 		}
 
-		line := m.styles.index.Render(fmt.Sprintf("  %2d ", i+1)) + text + suffix
+		line := m.styles.index.Render(fmt.Sprintf("  %2d ", i+1)) + prefix + text
 		if width > 0 {
 			line = ansi.Truncate(line, width, "…")
 		}
@@ -182,9 +195,10 @@ func (m model) renderIndexedCommands(width int) string {
 	return strings.Join(lines, "\n")
 }
 
-// aliasSuffix renders the user-defined alias labels for a command as a
-// green-italic ` <name>` tag, or an empty string when there are none.
-func (m model) aliasSuffix(command string) string {
+// aliasPrefix renders the user-defined alias labels for a command as a
+// green-italic `<name> ` tag shown before the command, or an empty string when
+// there are none.
+func (m model) aliasPrefix(command string) string {
 	labels := core.AliasesForCommand(command, m.aliases)
 	if len(labels) == 0 {
 		return ""
@@ -194,7 +208,31 @@ func (m model) aliasSuffix(command string) string {
 	for i, label := range labels {
 		tags[i] = "<" + label + ">"
 	}
-	return " " + m.styles.alias.Render(strings.Join(tags, " "))
+	return m.styles.alias.Render(strings.Join(tags, " ")) + " "
+}
+
+// highlightMatch styles the bytes of text at the given positions, used to mark
+// the characters a fuzzy query matched. With no positions it returns text
+// untouched.
+func highlightMatch(text string, positions []int, style lipgloss.Style) string {
+	if len(positions) == 0 {
+		return text
+	}
+
+	set := make(map[int]struct{}, len(positions))
+	for _, p := range positions {
+		set[p] = struct{}{}
+	}
+
+	var b strings.Builder
+	for i, r := range text {
+		if _, ok := set[i]; ok {
+			b.WriteString(style.Render(string(r)))
+		} else {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func (m model) renderEditLine() string {

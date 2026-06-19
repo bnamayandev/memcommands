@@ -99,34 +99,49 @@ func (m model) updateAlias(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.closeAlias()
 		return m, nil
 	case "enter":
-		m.saveAlias()
+		if m.saveAlias() {
+			m.closeAlias()
+		}
 		return m, nil
 	}
 
+	// Editing the name clears any stale "already in use" warning.
+	m.aliasError = ""
 	var cmd tea.Cmd
 	m.aliasInput, cmd = m.aliasInput.Update(msg)
 	return m, cmd
 }
 
 // saveAlias persists the typed alias for the targeted command and rebuilds the
-// search index so it can be found immediately.
-func (m *model) saveAlias() {
+// search index so it can be found immediately. It refuses to reuse an alias
+// name that is already bound to a different command, leaving the box open with
+// an error so the user can pick another name; the bool reports whether the save
+// went through.
+func (m *model) saveAlias() bool {
 	alias := strings.TrimSpace(m.aliasInput.Value())
 	target := strings.Join(strings.Fields(strings.TrimSpace(m.aliasTarget)), " ")
-	if alias != "" && target != "" {
-		if m.userAliases == nil {
-			m.userAliases = make(map[string]string)
-		}
-		m.userAliases[alias] = target
-		_ = core.SaveUserAliases(m.userAliases)
-		m.aliases.ByFullCommand = core.BuildUserAliasIndex(m.userAliases)
-		m.refreshCommands()
+	if alias == "" || target == "" {
+		return false
 	}
-	m.closeAlias()
+
+	if existing, ok := m.userAliases[alias]; ok && existing != target {
+		m.aliasError = fmt.Sprintf("alias %q already in use", alias)
+		return false
+	}
+
+	if m.userAliases == nil {
+		m.userAliases = make(map[string]string)
+	}
+	m.userAliases[alias] = target
+	_ = core.SaveUserAliases(m.userAliases)
+	m.aliases.ByFullCommand = core.BuildUserAliasIndex(m.userAliases)
+	m.refreshCommands()
+	return true
 }
 
 func (m *model) closeAlias() {
 	m.aliasing = false
+	m.aliasError = ""
 	m.aliasInput.Blur()
 }
 
@@ -253,6 +268,7 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.selectedIndex >= 0 && m.selectedIndex < len(m.commands) {
 			m.aliasTarget = m.commands[m.selectedIndex]
 			m.aliasInput.SetValue("")
+			m.aliasError = ""
 			m.aliasing = true
 			return m, m.aliasInput.Focus()
 		}

@@ -54,6 +54,7 @@ type model struct {
 	aliasing    bool
 	aliasInput  textinput.Model
 	aliasTarget string
+	aliasError  string
 	userAliases map[string]string
 }
 

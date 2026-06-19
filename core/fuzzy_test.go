@@ -147,6 +147,28 @@ func TestGetFuzzyScoreListMatchesUserAlias(t *testing.T) {
 	}
 }
 
+func TestMatchPositionsReportsMatchedBytes(t *testing.T) {
+	got := MatchPositions("gs", "git status")
+	want := []int{0, 4}
+	if len(got) != len(want) {
+		t.Fatalf("expected %d positions, got %v", len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected positions %v, got %v", want, got)
+		}
+	}
+}
+
+func TestMatchPositionsReturnsNilWhenNoMatch(t *testing.T) {
+	if got := MatchPositions("xyz", "git status"); got != nil {
+		t.Fatalf("expected nil for non-matching query, got %v", got)
+	}
+	if got := MatchPositions("", "git status"); got != nil {
+		t.Fatalf("expected nil for empty query, got %v", got)
+	}
+}
+
 func TestUserAliasRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
