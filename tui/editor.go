@@ -105,7 +105,6 @@ func (m model) updateAlias(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Editing the name clears any stale "already in use" warning.
 	m.aliasError = ""
 	var cmd tea.Cmd
 	m.aliasInput, cmd = m.aliasInput.Update(msg)
@@ -113,10 +112,7 @@ func (m model) updateAlias(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // saveAlias persists the typed alias for the targeted command and rebuilds the
-// search index so it can be found immediately. It refuses to reuse an alias
-// name that is already bound to a different command, leaving the box open with
-// an error so the user can pick another name; the bool reports whether the save
-// went through.
+// search index so it can be found immediately.
 func (m *model) saveAlias() bool {
 	alias := strings.TrimSpace(m.aliasInput.Value())
 	target := strings.Join(strings.Fields(strings.TrimSpace(m.aliasTarget)), " ")
@@ -282,6 +278,8 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.clampCursor()
 	case "d", "c", "y":
 		m.pending = key
+	case "u":
+		m.undoDelete()
 	case "p":
 		m.paste(true)
 	case "P":
@@ -317,6 +315,11 @@ func (m model) applyOperator(key string) model {
 	op := m.pending
 	m.pending = ""
 
+	if op == "d" && key == "d" {
+		m.deleteSelected()
+		return m
+	}
+
 	start, end := m.cursor, m.cursor
 	switch key {
 	case op:
@@ -350,6 +353,45 @@ func (m model) applyOperator(key string) model {
 		m.mode = modeInsert
 	}
 	return m
+}
+
+func (m *model) deleteSelected() {
+	if m.selectedIndex < 0 || m.selectedIndex >= len(m.commands) {
+		return
+	}
+	cmd := m.commands[m.selectedIndex]
+	key := core.NormalizeCommandKey(cmd)
+
+	if m.deleted == nil {
+		m.deleted = make(map[string]string)
+	}
+	m.deleted[key] = cmd
+	m.undoStack = append(m.undoStack, key)
+
+	m.persistDeleted()
+	m.refreshCommands()
+	m.loadEditBuffer()
+}
+
+func (m *model) undoDelete() {
+	if len(m.undoStack) == 0 {
+		return
+	}
+	key := m.undoStack[len(m.undoStack)-1]
+	m.undoStack = m.undoStack[:len(m.undoStack)-1]
+	delete(m.deleted, key)
+
+	m.persistDeleted()
+	m.refreshCommands()
+	m.loadEditBuffer()
+}
+
+func (m *model) persistDeleted() {
+	commands := make([]string, 0, len(m.deleted))
+	for _, cmd := range m.deleted {
+		commands = append(commands, cmd)
+	}
+	_ = core.SaveDeletedCommands(commands)
 }
 
 func (m *model) insertRunes(rs []rune) {

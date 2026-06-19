@@ -56,6 +56,9 @@ type model struct {
 	aliasTarget string
 	aliasError  string
 	userAliases map[string]string
+
+	deleted   map[string]string
+	undoStack []string
 }
 
 func New(commands []string, aliases core.AliasIndex) *model {
@@ -77,13 +80,19 @@ func New(commands []string, aliases core.AliasIndex) *model {
 	userAliases := core.LoadUserAliases()
 	aliases.ByFullCommand = core.BuildUserAliasIndex(userAliases)
 
+	deleted := make(map[string]string)
+	for _, cmd := range core.LoadDeletedCommands() {
+		deleted[core.NormalizeCommandKey(cmd)] = cmd
+	}
+
 	m := &model{
 		history:     commands,
-		commands:    commands,
+		commands:    nil,
 		aliases:     aliases,
 		userInput:   input,
 		aliasInput:  aliasInput,
 		userAliases: userAliases,
+		deleted:     deleted,
 		styles:      DefaultStyles(),
 		focus:       focusSearch,
 	}
@@ -207,6 +216,9 @@ func (m *model) refreshCommands() {
 
 	m.commands = m.commands[:0]
 	for _, s := range scored {
+		if _, ok := m.deleted[core.NormalizeCommandKey(s.Command)]; ok {
+			continue
+		}
 		m.commands = append(m.commands, s.Command)
 	}
 

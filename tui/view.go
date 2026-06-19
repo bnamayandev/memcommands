@@ -195,9 +195,6 @@ func (m model) renderIndexedCommands(width int) string {
 	return strings.Join(lines, "\n")
 }
 
-// aliasPrefix renders the user-defined alias labels for a command as a
-// green-italic `<name> ` tag shown before the command, or an empty string when
-// there are none.
 func (m model) aliasPrefix(command string) string {
 	labels := core.AliasesForCommand(command, m.aliases)
 	if len(labels) == 0 {
@@ -211,9 +208,6 @@ func (m model) aliasPrefix(command string) string {
 	return m.styles.alias.Render(strings.Join(tags, " ")) + " "
 }
 
-// highlightMatch styles the bytes of text at the given positions, used to mark
-// the characters a fuzzy query matched. With no positions it returns text
-// untouched.
 func highlightMatch(text string, positions []int, style lipgloss.Style) string {
 	if len(positions) == 0 {
 		return text
@@ -292,7 +286,7 @@ func (m model) statusBar() string {
 		hints = "h/l 0 $ w b extend · y yank · d/x del · c change · esc cancel"
 	default:
 		badge = m.styles.modeNormal.Render("NORMAL")
-		hints = "j/k move · h/l 0 $ w b cursor · v visual · i/a edit · x dd dw cw del · yy/y$ yank · p paste · m alias · enter run · esc search"
+		hints = "j/k move · h/l 0 $ w b cursor · v visual · i/a edit · x dw cw del · dd remove · u undo · yy/y$ yank · p paste · m alias · enter run · esc search"
 	}
 
 	bar := badge + " " + m.styles.hints.Render(hints)

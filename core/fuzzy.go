@@ -54,10 +54,6 @@ func FuzzyScore(query, target string) int {
 	return -1
 }
 
-// MatchPositions returns the byte indices in target matched against query using
-// the same greedy left-to-right scan as FuzzyScore. It returns nil when target
-// does not contain every character of query in order, so callers can use a nil
-// result to mean "no highlight".
 func MatchPositions(query, target string) []int {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -93,6 +89,10 @@ func normalizeCommandKey(s string) string {
 	s = strings.Join(strings.Fields(s), " ")
 	s = strings.ToLower(s)
 	return s
+}
+
+func NormalizeCommandKey(s string) string {
+	return normalizeCommandKey(s)
 }
 
 func commandVariants(command string, aliases AliasIndex) []string {
