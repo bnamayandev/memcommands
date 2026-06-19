@@ -68,11 +68,25 @@ Once you're in the list, you're in Vim **normal mode** on the selected command.
 | `i` / `a` / `I` / `A` | Enter insert mode (before/after cursor, line start/end) |
 | `x` | Delete character under cursor |
 | `d` / `c` / `y` + motion | Delete / change / yank (e.g. `dw`, `d$`, `cc`, `yy`) |
+| `v` / `V` | Enter visual mode (`V` selects the whole line) |
 | `p` / `P` | Paste after / before cursor |
 | `m` | Open the floating box to alias the selected command |
 | `Enter` | Run the (possibly edited) command |
 | `Esc` | Back to search |
 | `Ctrl-c` | Quit |
+
+### 🔆 Visual mode
+
+Press `v` to start a selection (or `V` to grab the whole line), then extend it
+with the usual motions:
+
+| Key | Action |
+| --- | --- |
+| `h` / `l` / `0` / `$` / `w` / `b` | Extend the selection |
+| `y` | Yank the selection to the clipboard |
+| `d` / `x` | Delete the selection |
+| `c` | Delete the selection and drop into insert mode |
+| `Esc` | Cancel back to normal mode |
 
 ### ⌨️ Insert mode
 

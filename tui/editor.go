@@ -18,10 +18,75 @@ func (m model) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		return m.quit()
 	}
-	if m.mode == modeInsert {
+	switch m.mode {
+	case modeInsert:
 		return m.updateInsert(msg)
+	case modeVisual:
+		return m.updateVisual(msg)
 	}
 	return m.updateNormal(msg)
+}
+
+// visualRange returns the half-open [start, end) rune span currently selected
+// in visual mode. The selection is inclusive of the character under the cursor.
+func (m model) visualRange() (int, int) {
+	start, end := m.visualAnchor, m.cursor
+	if start > end {
+		start, end = end, start
+	}
+	end++
+	if end > len(m.editBuffer) {
+		end = len(m.editBuffer)
+	}
+	if start < 0 {
+		start = 0
+	}
+	return start, end
+}
+
+func (m model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.mode = modeNormal
+		m.clampCursor()
+	case "enter":
+		return m.run(string(m.editBuffer))
+	case "h":
+		m.cursor--
+		m.clampCursor()
+	case "l":
+		m.cursor++
+		m.clampCursor()
+	case "0":
+		m.cursor = 0
+	case "$":
+		m.cursor = len(m.editBuffer) - 1
+		m.clampCursor()
+	case "w":
+		m.cursor = nextWordStart(m.editBuffer, m.cursor)
+		m.clampCursor()
+	case "b":
+		m.cursor = prevWordStart(m.editBuffer, m.cursor)
+		m.clampCursor()
+	case "y":
+		start, end := m.visualRange()
+		writeClipboard(string(m.editBuffer[start:end]))
+		m.cursor = start
+		m.mode = modeNormal
+		m.clampCursor()
+	case "d", "x":
+		start, end := m.visualRange()
+		m.editBuffer = append(m.editBuffer[:start], m.editBuffer[end:]...)
+		m.cursor = start
+		m.mode = modeNormal
+		m.clampCursor()
+	case "c":
+		start, end := m.visualRange()
+		m.editBuffer = append(m.editBuffer[:start], m.editBuffer[end:]...)
+		m.cursor = start
+		m.mode = modeInsert
+	}
+	return m, nil
 }
 
 // updateAlias drives the floating alias box: every key feeds the input except
@@ -191,6 +256,14 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.aliasing = true
 			return m, m.aliasInput.Focus()
 		}
+	case "v":
+		m.mode = modeVisual
+		m.visualAnchor = m.cursor
+	case "V":
+		m.mode = modeVisual
+		m.visualAnchor = 0
+		m.cursor = len(m.editBuffer) - 1
+		m.clampCursor()
 	case "d", "c", "y":
 		m.pending = key
 	case "p":
@@ -298,7 +371,7 @@ func (m *model) paste(after bool) {
 
 func (m *model) clampCursor() {
 	maxCursor := len(m.editBuffer)
-	if m.mode == modeNormal {
+	if m.mode != modeInsert {
 		maxCursor = len(m.editBuffer) - 1
 	}
 	if maxCursor < 0 {

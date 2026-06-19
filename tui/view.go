@@ -35,11 +35,13 @@ type Styles struct {
 	selectedRow   lipgloss.Style
 	cursor        lipgloss.Style
 	cursorBar     lipgloss.Style
+	visual        lipgloss.Style
 	alias         lipgloss.Style
 	hints         lipgloss.Style
 	modeSearch    lipgloss.Style
 	modeNormal    lipgloss.Style
 	modeInsert    lipgloss.Style
+	modeVisual    lipgloss.Style
 }
 
 func DefaultStyles() *Styles {
@@ -61,11 +63,15 @@ func DefaultStyles() *Styles {
 			Bold(true),
 		cursor:     lipgloss.NewStyle().Reverse(true),
 		cursorBar:  lipgloss.NewStyle().Underline(true),
+		visual: lipgloss.NewStyle().
+			Background(lipgloss.Color(colBlue)).
+			Foreground(lipgloss.Color(colBase)),
 		alias:      lipgloss.NewStyle().Foreground(lipgloss.Color(colGreen)).Italic(true),
 		hints:      lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0)),
 		modeSearch: badge.Background(lipgloss.Color(colBlue)),
 		modeNormal: badge.Background(lipgloss.Color(colGreen)),
 		modeInsert: badge.Background(lipgloss.Color(colMauve)),
+		modeVisual: badge.Background(lipgloss.Color(colBlue)),
 	}
 }
 
@@ -192,6 +198,19 @@ func (m model) aliasSuffix(command string) string {
 }
 
 func (m model) renderEditLine() string {
+	if m.mode == modeVisual {
+		start, end := m.visualRange()
+		var b strings.Builder
+		for i, r := range m.editBuffer {
+			if i >= start && i < end {
+				b.WriteString(m.styles.visual.Render(string(r)))
+			} else {
+				b.WriteRune(r)
+			}
+		}
+		return b.String()
+	}
+
 	if m.mode == modeInsert {
 		var b strings.Builder
 		for i, r := range m.editBuffer {
@@ -230,9 +249,12 @@ func (m model) statusBar() string {
 	case m.mode == modeInsert:
 		badge = m.styles.modeInsert.Render("INSERT")
 		hints = "esc normal · enter run"
+	case m.mode == modeVisual:
+		badge = m.styles.modeVisual.Render("VISUAL")
+		hints = "h/l 0 $ w b extend · y yank · d/x del · c change · esc cancel"
 	default:
 		badge = m.styles.modeNormal.Render("NORMAL")
-		hints = "j/k move · h/l 0 $ w b cursor · i/a edit · x dd dw cw del · yy/y$ yank · p paste · m alias · enter run · esc search"
+		hints = "j/k move · h/l 0 $ w b cursor · v visual · i/a edit · x dd dw cw del · yy/y$ yank · p paste · m alias · enter run · esc search"
 	}
 
 	bar := badge + " " + m.styles.hints.Render(hints)

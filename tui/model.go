@@ -23,6 +23,7 @@ type vimMode int
 const (
 	modeNormal vimMode = iota
 	modeInsert
+	modeVisual
 )
 
 type model struct {
@@ -44,6 +45,9 @@ type model struct {
 	pending    string
 	count      string
 	gPending   bool
+	// visualAnchor is the fixed end of the selection while in visual mode; the
+	// other end follows the cursor.
+	visualAnchor int
 
 	// aliasing overlays a floating box that captures a user-defined alias for
 	// the selected command. userAliases is the alias→command map we persist.
