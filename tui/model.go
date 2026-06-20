@@ -47,12 +47,12 @@ type model struct {
 	pendingCount int
 	count        string
 	gPending     bool
-	// visualAnchor is the fixed end of the selection while in visual mode; the
-	// other end follows the cursor.
+	// visualAnchor is the fixed end of the visual selection; the other end follows
+	// the cursor.
 	visualAnchor int
 
-	// aliasing overlays a floating box that captures a user-defined alias for
-	// the selected command. userAliases is the alias→command map we persist.
+	// aliasing overlays a box capturing an alias for the selected command;
+	// userAliases is the persisted alias→command map.
 	aliasing    bool
 	aliasInput  textinput.Model
 	aliasTarget string
@@ -61,17 +61,15 @@ type model struct {
 
 	deleted   map[string]string
 	undoStack []string
-	// edited maps a command's normalized key to its rewritten text, so in-place
-	// buffer edits survive navigation and (after :w) restarts.
+	// edited maps a command's normalized key to its rewritten text, so edits
+	// survive navigation and (after :w) restarts.
 	edited map[string]string
 
 	// vim-style ":" command line; commandLine is the text after the colon.
 	commandMode bool
 	commandLine string
-	// statusMsg is a transient message shown until the next normal-mode key.
-	statusMsg string
-	// dirty marks staged aliases/deletions not yet written to disk.
-	dirty bool
+	statusMsg   string // transient message shown until the next normal-mode key
+	dirty       bool   // staged aliases/deletions not yet written to disk
 }
 
 func New(commands []string, aliases core.AliasIndex) *model {
@@ -115,7 +113,8 @@ func New(commands []string, aliases core.AliasIndex) *model {
 	return m
 }
 
-// aliasesLoadedMsg carries the shell aliases loaded async, so the interactive-shell spawn never blocks the first draw.
+// aliasesLoadedMsg carries shell aliases loaded async, so the interactive-shell
+// spawn never blocks the first draw.
 type aliasesLoadedMsg struct {
 	byAlias   map[string]string
 	byCommand map[string][]string
@@ -130,14 +129,12 @@ func (m model) Init() tea.Cmd {
 	return loadShellAliases
 }
 
-// contentWidth is the inner width available inside the bordered blocks,
-// derived from the current terminal width (1 column per side for borders).
+// contentWidth is the width inside the borders (1 column per side).
 func (m model) contentWidth() int {
 	return max(0, m.width-2)
 }
 
-// innerWidth is the text width available inside a bordered block once the
-// horizontal padding is subtracted.
+// innerWidth is contentWidth minus horizontal padding.
 func (m model) innerWidth() int {
 	return max(0, m.contentWidth()-2*hPad)
 }
@@ -252,8 +249,7 @@ func (m *model) loadEditBuffer() {
 	m.cursor = 0
 }
 
-// resolve returns the edited text for a command if one is staged, else the
-// command itself.
+// resolve returns the staged edit for a command, else the command itself.
 func (m model) resolve(command string) string {
 	if text, ok := m.edited[core.NormalizeCommandKey(command)]; ok {
 		return text
@@ -261,10 +257,9 @@ func (m model) resolve(command string) string {
 	return command
 }
 
-// commitEdit stages the current edit buffer against the selected command. It
-// runs whenever we're about to leave the buffer (navigate, run, :command) so an
-// in-place edit isn't lost. A buffer matching the original clears the overlay;
-// an empty buffer is ignored so a command can't be blanked out.
+// commitEdit stages the edit buffer against the selected command before leaving
+// it (navigate, run, :command). A buffer matching the original clears the
+// overlay; an empty buffer is ignored so a command can't be blanked out.
 func (m *model) commitEdit() {
 	if m.focus != focusResults || m.selectedIndex < 0 || m.selectedIndex >= len(m.commands) {
 		return

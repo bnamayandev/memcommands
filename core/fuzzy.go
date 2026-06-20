@@ -121,8 +121,8 @@ func commandVariants(command string, aliases AliasIndex) []string {
 		variants = append(variants, alias+rest)
 	}
 
-	// User-defined aliases label the whole command line, so they match as
-	// standalone search terms rather than as a command prefix.
+	// User aliases label the whole command line, so they match as standalone
+	// search terms rather than as a command prefix.
 	for _, label := range aliases.ByFullCommand[normalizeCommandKey(command)] {
 		variants = append(variants, label)
 	}
@@ -158,22 +158,20 @@ func bestVariantScore(query string, variants []string) int {
 	return best
 }
 
-// corpusEntry is a history command with its match variants precomputed, so
-// search doesn't rebuild them on every keystroke.
+// corpusEntry precomputes a command's match variants so search doesn't rebuild
+// them on every keystroke.
 type corpusEntry struct {
 	command  string
 	index    int
 	variants []string
 }
 
-// Corpus is a search-ready, de-duplicated view of the history; rebuild only
-// when the alias index changes.
+// Corpus is a search-ready, de-duplicated view of history; rebuild only when the
+// alias index changes.
 type Corpus struct {
 	entries []corpusEntry
 }
 
-// NewCorpus de-duplicates the history (keeping the most recent occurrence) and
-// precomputes each entry's alias-aware match variants.
 func NewCorpus(commandHistory []string, aliases AliasIndex) *Corpus {
 	entries := make([]corpusEntry, 0, len(commandHistory))
 	posByKey := make(map[string]int, len(commandHistory))
@@ -192,7 +190,7 @@ func NewCorpus(commandHistory []string, aliases AliasIndex) *Corpus {
 
 		key := normalizeCommandKey(command)
 		if pos, ok := posByKey[key]; ok {
-			// Keep the most recent occurrence (later = larger index = the recency tie-break).
+			// Keep the most recent occurrence (larger index wins recency ties).
 			entries[pos] = entry
 			continue
 		}
@@ -204,7 +202,7 @@ func NewCorpus(commandHistory []string, aliases AliasIndex) *Corpus {
 }
 
 // Search returns matches ordered by score then recency; an empty query returns
-// everything, most-recent-first.
+// everything most-recent-first.
 func (c *Corpus) Search(query string) []ScoredCommand {
 	query = strings.TrimSpace(query)
 

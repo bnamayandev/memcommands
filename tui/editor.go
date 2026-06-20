@@ -27,8 +27,8 @@ func (m model) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m.updateNormal(msg)
 }
 
-// visualRange returns the half-open [start, end) rune span currently selected
-// in visual mode. The selection is inclusive of the character under the cursor.
+// visualRange returns the half-open [start, end) rune span selected in visual
+// mode, inclusive of the character under the cursor.
 func (m model) visualRange() (int, int) {
 	start, end := m.visualAnchor, m.cursor
 	if start > end {
@@ -102,8 +102,7 @@ func (m model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateAlias drives the floating alias box: every key feeds the input except
-// enter (save) and esc (cancel).
+// updateAlias drives the alias box: keys feed the input except enter/esc.
 func (m model) updateAlias(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
@@ -124,8 +123,8 @@ func (m model) updateAlias(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// saveAlias persists the typed alias for the targeted command and rebuilds the
-// search index so it can be found immediately.
+// saveAlias persists the typed alias and rebuilds the search index so it's
+// findable immediately.
 func (m *model) saveAlias() bool {
 	alias := strings.TrimSpace(m.aliasInput.Value())
 	target := strings.Join(strings.Fields(strings.TrimSpace(m.aliasTarget)), " ")
@@ -150,7 +149,7 @@ func (m *model) saveAlias() bool {
 }
 
 // updateCommand drives the ":" line: enter executes, esc/backspace-past-start
-// cancels, everything else appends.
+// cancels, else append.
 func (m model) updateCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
@@ -261,8 +260,8 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.applyOperator(key), nil
 	}
 
-	// Resolve a pending `g` (the first key of a `gg` sequence). `gg` jumps to
-	// the top, or to the count-th line (1-indexed) when a count was given.
+	// Resolve a pending `g`: `gg` jumps to the top, or to the count-th line
+	// (1-indexed) when a count was given.
 	if m.gPending {
 		m.gPending = false
 		if key == "g" {
@@ -276,8 +275,8 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// A leading non-zero digit (or any digit once a count is in progress)
-	// builds up a numeric count for the next motion, like in vim.
+	// Digits build a numeric count for the next motion, like vim. A leading 0 is
+	// the "0" motion, not a count.
 	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' || (key == "0" && m.count != "") {
 		m.count += key
 		return m, nil
@@ -389,8 +388,8 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// setSelection moves the highlighted row to i, clamped to the list bounds,
-// and keeps it visible while reloading the edit buffer for the new command.
+// setSelection moves the highlighted row to i (clamped), keeps it visible, and
+// reloads the edit buffer for the new command.
 func (m *model) setSelection(i int) {
 	if len(m.commands) == 0 {
 		return

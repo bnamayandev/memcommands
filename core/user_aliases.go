@@ -1,6 +1,5 @@
-// User-defined aliases let the user attach a searchable label to a specific
-// command from inside the TUI. They are persisted separately from the shell's
-// own aliases so they survive across runs.
+// User-defined aliases attach a searchable label to a command from the TUI.
+// Persisted separately from the shell's own aliases so they survive runs.
 package core
 
 import (
@@ -10,8 +9,6 @@ import (
 	"path/filepath"
 )
 
-// userAliasPath returns the on-disk location for user-defined aliases,
-// honouring XDG_CONFIG_HOME and falling back to ~/.config.
 func userAliasPath() (string, error) {
 	dir := os.Getenv("XDG_CONFIG_HOME")
 	if dir == "" {
@@ -24,8 +21,6 @@ func userAliasPath() (string, error) {
 	return filepath.Join(dir, "memcommands", "aliases.json"), nil
 }
 
-// LoadUserAliases reads the saved alias→command map. A missing file is not an
-// error: it simply means the user hasn't created any aliases yet.
 func LoadUserAliases() map[string]string {
 	path, err := userAliasPath()
 	if err != nil {
@@ -44,8 +39,6 @@ func LoadUserAliases() map[string]string {
 	return aliases
 }
 
-// SaveUserAliases writes the alias→command map back to disk, creating the
-// config directory as needed.
 func SaveUserAliases(aliases map[string]string) error {
 	path, err := userAliasPath()
 	if err != nil {
@@ -64,7 +57,7 @@ func SaveUserAliases(aliases map[string]string) error {
 	return os.WriteFile(path, data, 0o644)
 }
 
-// BuildUserAliasIndex turns an alias→command map into a normalized
+// BuildUserAliasIndex inverts an alias→command map into a normalized
 // command→[]alias index for fuzzy matching.
 func BuildUserAliasIndex(aliases map[string]string) map[string][]string {
 	byCommand := make(map[string][]string, len(aliases))

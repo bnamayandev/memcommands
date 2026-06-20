@@ -1,4 +1,3 @@
-// this file exists to make it so that we can support whatever aliases the user has set up
 package core
 
 import (
@@ -12,15 +11,13 @@ import (
 type AliasIndex struct {
 	ByAlias   map[string]string
 	ByCommand map[string][]string
-	// ByFullCommand maps a normalized command line to the user-defined alias
-	// labels created from inside the TUI. These are search-only labels: they
-	// surface the underlying command but never change how it runs.
+	// Search-only labels: normalized command line → user-defined aliases from the
+	// TUI. They surface the command but never change how it runs.
 	ByFullCommand map[string][]string
 }
 
-// LoadShellAliases lists the user's shell aliases via an interactive shell.
-// Kept separate so it can run async: the interactive shell sources the full rc
-// file, which is the slowest part of startup.
+// LoadShellAliases lists shell aliases via an interactive shell. Run async: it
+// sources the full rc file, the slowest part of startup.
 func LoadShellAliases() (byAlias map[string]string, byCommand map[string][]string) {
 	byAlias = make(map[string]string)
 	byCommand = make(map[string][]string)
@@ -31,8 +28,8 @@ func LoadShellAliases() (byAlias map[string]string, byCommand map[string][]strin
 	}
 
 	cmd := exec.Command(shell, "-ic", "alias")
-	// New session, no controlling terminal: keeps the shell's job-control setup
-	// off the TTY Bubble Tea owns (else async loading corrupts input).
+	// New session: keeps the shell's job-control off the TTY Bubble Tea owns,
+	// else async loading corrupts input.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	cmd.Stdin = nil
 	output, err := cmd.Output()
@@ -101,8 +98,6 @@ func containsString(values []string, target string) bool {
 	return false
 }
 
-// AliasesForCommand returns the user-defined alias labels attached to a
-// command, if any.
 func AliasesForCommand(command string, aliases AliasIndex) []string {
 	return aliases.ByFullCommand[normalizeCommandKey(command)]
 }

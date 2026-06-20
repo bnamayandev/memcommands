@@ -1,6 +1,5 @@
-// Edited commands let the user rewrite a history command in place from the TUI.
-// They are stored as a normalized-original-key → edited-text map so the edit
-// survives navigation and restarts.
+// Edited commands rewrite a history command in place from the TUI, stored as a
+// normalized-original-key → edited-text map so edits survive navigation/restarts.
 package core
 
 import (
@@ -22,8 +21,6 @@ func editedPath() (string, error) {
 	return filepath.Join(dir, "memcommands", "edited.json"), nil
 }
 
-// LoadEditedCommands reads the saved original-key → edited-text map. A missing
-// file simply means no edits yet.
 func LoadEditedCommands() map[string]string {
 	path, err := editedPath()
 	if err != nil {
@@ -42,7 +39,6 @@ func LoadEditedCommands() map[string]string {
 	return edits
 }
 
-// SaveEditedCommands writes the edit map back to disk.
 func SaveEditedCommands(edits map[string]string) error {
 	path, err := editedPath()
 	if err != nil {
