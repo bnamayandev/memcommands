@@ -1,0 +1,489 @@
+package main
+
+import (
+	"testing"
+
+	"memcommands/core"
+)
+
+// The fixture model holds two commands. The corpus sorts them so that index 0
+// is "go build ./..." (14 runes) and index 1 is "git status". Buffer indices
+// for "go build ./...":
+//
+//	g0 o1 _2 b3 u4 i5 l6 d7 _8 .9 /10 .11 .12 .13
+const (
+	cmd0 = "go build ./..."
+	cmd1 = "git status"
+)
+
+// enter results focus in normal mode, selection on cmd0.
+func results(t *testing.T) model {
+	return keys(newModel(t), "ctrl+j")
+}
+
+func wantBuf(t *testing.T, m model, want string) {
+	t.Helper()
+	if string(m.editBuffer) != want {
+		t.Fatalf("buffer = %q, want %q", string(m.editBuffer), want)
+	}
+}
+
+func wantCursor(t *testing.T, m model, want int) {
+	t.Helper()
+	if m.cursor != want {
+		t.Fatalf("cursor = %d, want %d", m.cursor, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Normal-mode cursor motions
+// ---------------------------------------------------------------------------
+
+func TestMotionLRClampAtBounds(t *testing.T) {
+	m := results(t)
+	wantCursor(t, m, 0)
+	m = keys(m, "h") // already at start
+	wantCursor(t, m, 0)
+	m = keys(m, "$")
+	wantCursor(t, m, len(cmd0)-1)
+	m = keys(m, "l") // already at last char (normal mode can't pass end)
+	wantCursor(t, m, len(cmd0)-1)
+}
+
+func TestMotionZeroAndDollar(t *testing.T) {
+	m := keys(results(t), "l", "l", "l")
+	wantCursor(t, m, 3)
+	m = keys(m, "0")
+	wantCursor(t, m, 0)
+	m = keys(m, "$")
+	wantCursor(t, m, len(cmd0)-1)
+}
+
+func TestMotionWordForwardClampsAtEnd(t *testing.T) {
+	m := keys(results(t), "w", "w", "w", "w")
+	// Word starts are 0,3,9; further w clamps to last char.
+	wantCursor(t, m, len(cmd0)-1)
+}
+
+func TestMotionWordBackToStart(t *testing.T) {
+	m := keys(results(t), "$", "b", "b", "b")
+	wantCursor(t, m, 0)
+}
+
+func TestCountResetsAfterMotion(t *testing.T) {
+	m := keys(results(t), "3", "l")
+	wantCursor(t, m, 3)
+	// A bare l afterwards moves only one: the count was consumed.
+	m = keys(m, "l")
+	wantCursor(t, m, 4)
+}
+
+// ---------------------------------------------------------------------------
+// List navigation
+// ---------------------------------------------------------------------------
+
+func TestNavDownUpAndClamp(t *testing.T) {
+	m := keys(results(t), "j")
+	if m.selectedIndex != 1 {
+		t.Fatalf("j -> index %d, want 1", m.selectedIndex)
+	}
+	m = keys(m, "5", "j") // clamps at last
+	if m.selectedIndex != 1 {
+		t.Fatalf("count j past end -> %d, want 1", m.selectedIndex)
+	}
+	m = keys(m, "5", "k") // clamps at first
+	if m.selectedIndex != 0 {
+		t.Fatalf("count k past start -> %d, want 0", m.selectedIndex)
+	}
+}
+
+func TestGotoTopBottom(t *testing.T) {
+	m := keys(results(t), "G")
+	if m.selectedIndex != 1 {
+		t.Fatalf("G -> %d, want 1", m.selectedIndex)
+	}
+	m = keys(m, "g", "g")
+	if m.selectedIndex != 0 {
+		t.Fatalf("gg -> %d, want 0", m.selectedIndex)
+	}
+	m = keys(m, "2", "G")
+	if m.selectedIndex != 1 {
+		t.Fatalf("2G -> %d, want 1", m.selectedIndex)
+	}
+	m = keys(m, "1", "g", "g")
+	if m.selectedIndex != 0 {
+		t.Fatalf("1gg -> %d, want 0", m.selectedIndex)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Insert-mode entry points
+// ---------------------------------------------------------------------------
+
+func TestInsertAtCursor(t *testing.T) {
+	m := keys(results(t), "i", "X")
+	wantBuf(t, m, "Xgo build ./...")
+}
+
+func TestAppendAfterCursor(t *testing.T) {
+	m := keys(results(t), "a", "X")
+	wantBuf(t, m, "gXo build ./...")
+}
+
+func TestAppendAtEndOfLine(t *testing.T) {
+	m := keys(results(t), "A", "X")
+	wantBuf(t, m, "go build ./...X")
+}
+
+func TestInsertAtStartOfLine(t *testing.T) {
+	m := keys(results(t), "l", "l", "l", "I", "X")
+	wantBuf(t, m, "Xgo build ./...")
+	wantCursor(t, m, 1)
+}
+
+func TestInsertBackspaceAtStartIsNoop(t *testing.T) {
+	m := keys(results(t), "i", "backspace")
+	wantBuf(t, m, cmd0)
+	wantCursor(t, m, 0)
+}
+
+func TestInsertBackspaceDeletesLeftOfCursor(t *testing.T) {
+	m := keys(results(t), "A", "backspace")
+	wantBuf(t, m, "go build ./..")
+}
+
+// ---------------------------------------------------------------------------
+// x / delete-char
+// ---------------------------------------------------------------------------
+
+func TestDeleteCharCountClampsAtEnd(t *testing.T) {
+	m := keys(results(t), "$", "3", "x") // only one char remains under/after cursor
+	wantBuf(t, m, "go build ./..")
+}
+
+func TestDeleteCharOnEmptyBufferIsSafe(t *testing.T) {
+	m := keys(results(t), "d", "$") // empties the buffer
+	wantBuf(t, m, "")
+	m = keys(m, "x") // must not panic or corrupt
+	wantBuf(t, m, "")
+}
+
+// ---------------------------------------------------------------------------
+// Operators: d / c / y
+// ---------------------------------------------------------------------------
+
+func TestDeleteToEndOfLine(t *testing.T) {
+	m := keys(results(t), "l", "l", "l", "d", "$")
+	wantBuf(t, m, "go ")
+}
+
+func TestDeleteToStartOfLine(t *testing.T) {
+	m := keys(results(t), "l", "l", "l", "d", "0")
+	wantBuf(t, m, "build ./...")
+}
+
+func TestChangeWordEntersInsert(t *testing.T) {
+	m := keys(results(t), "c", "w")
+	if m.mode != modeInsert {
+		t.Fatalf("cw should enter insert mode, got %d", m.mode)
+	}
+	wantBuf(t, m, "build ./...")
+	m = keys(m, "X")
+	wantBuf(t, m, "Xbuild ./...")
+}
+
+func TestChangeWholeLine(t *testing.T) {
+	m := keys(results(t), "c", "c")
+	if m.mode != modeInsert {
+		t.Fatalf("cc should enter insert mode, got %d", m.mode)
+	}
+	wantBuf(t, m, "")
+}
+
+func TestYankLeavesBufferUntouched(t *testing.T) {
+	m := keys(results(t), "y", "w")
+	wantBuf(t, m, cmd0)
+	if m.mode != modeNormal {
+		t.Fatalf("yw should stay in normal mode, got %d", m.mode)
+	}
+}
+
+func TestOperatorWithBadMotionIsNoop(t *testing.T) {
+	m := keys(results(t), "d", "z") // z is not a motion
+	wantBuf(t, m, cmd0)
+	if m.pending != "" {
+		t.Fatalf("pending operator should clear after bad motion, got %q", m.pending)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Visual mode
+// ---------------------------------------------------------------------------
+
+func TestVisualDeleteSingleChar(t *testing.T) {
+	m := keys(results(t), "v", "d")
+	wantBuf(t, m, "o build ./...")
+	if m.mode != modeNormal {
+		t.Fatalf("visual d should return to normal, got %d", m.mode)
+	}
+}
+
+func TestVisualDeleteRange(t *testing.T) {
+	m := keys(results(t), "v", "l", "d") // select "go"
+	wantBuf(t, m, " build ./...")
+}
+
+func TestVisualChangeEntersInsert(t *testing.T) {
+	m := keys(results(t), "v", "l", "c")
+	if m.mode != modeInsert {
+		t.Fatalf("visual c should enter insert, got %d", m.mode)
+	}
+	wantBuf(t, m, " build ./...")
+	m = keys(m, "X")
+	wantBuf(t, m, "X build ./...")
+}
+
+func TestVisualLineSelectsWholeBuffer(t *testing.T) {
+	m := keys(results(t), "V", "d")
+	wantBuf(t, m, "")
+}
+
+func TestVisualYankReturnsToNormal(t *testing.T) {
+	m := keys(results(t), "v", "l", "l", "y")
+	wantBuf(t, m, cmd0)
+	if m.mode != modeNormal {
+		t.Fatalf("visual y should return to normal, got %d", m.mode)
+	}
+	wantCursor(t, m, 0) // cursor collapses to range start
+}
+
+// ---------------------------------------------------------------------------
+// Mode interrupts: escape out of each mode
+// ---------------------------------------------------------------------------
+
+func TestEscFromInsertReturnsToNormal(t *testing.T) {
+	m := keys(results(t), "i", "esc")
+	if m.mode != modeNormal || m.focus != focusResults {
+		t.Fatalf("esc from insert: mode=%d focus=%d, want normal/results", m.mode, m.focus)
+	}
+}
+
+func TestEscFromInsertKeepsTypedText(t *testing.T) {
+	m := keys(results(t), "I", "X", "esc")
+	wantBuf(t, m, "Xgo build ./...")
+	if m.mode != modeNormal {
+		t.Fatalf("want normal mode after esc, got %d", m.mode)
+	}
+}
+
+func TestEscFromVisualReturnsToNormal(t *testing.T) {
+	m := keys(results(t), "v", "l", "l", "esc")
+	if m.mode != modeNormal || m.focus != focusResults {
+		t.Fatalf("esc from visual: mode=%d focus=%d, want normal/results", m.mode, m.focus)
+	}
+}
+
+func TestDoubleEscFromInsertReachesSearch(t *testing.T) {
+	// First esc: insert -> normal. Second esc: normal -> search.
+	m := keys(results(t), "i", "esc", "esc")
+	if m.focus != focusSearch {
+		t.Fatalf("double esc should land in search focus, got %d", m.focus)
+	}
+}
+
+func TestDoubleEscFromVisualReachesSearch(t *testing.T) {
+	m := keys(results(t), "v", "esc", "esc")
+	if m.focus != focusSearch {
+		t.Fatalf("double esc from visual should reach search, got %d", m.focus)
+	}
+}
+
+func TestEscFromNormalReturnsToSearchMode(t *testing.T) {
+	m := keys(results(t), "esc")
+	if m.focus != focusSearch {
+		t.Fatalf("esc from normal should focus search, got %d", m.focus)
+	}
+}
+
+func TestEscFromCommandCancelsLine(t *testing.T) {
+	m := keys(results(t), ":", "w", "esc")
+	if m.commandMode {
+		t.Fatalf("esc should leave command mode")
+	}
+	if m.commandLine != "" {
+		t.Fatalf("esc should clear command line, got %q", m.commandLine)
+	}
+	if m.focus != focusResults {
+		t.Fatalf("esc from command should stay in results, got %d", m.focus)
+	}
+	if m.executed != "" {
+		t.Fatalf("cancelled command must not run, executed=%q", m.executed)
+	}
+}
+
+func TestEscFromAliasClosesBox(t *testing.T) {
+	m := keys(results(t), "m", "esc")
+	if m.aliasing {
+		t.Fatalf("esc should close the alias box")
+	}
+	if m.focus != focusResults {
+		t.Fatalf("esc from alias should stay in results, got %d", m.focus)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Pending-state interrupts (count / g / operator cancelled by another key)
+// ---------------------------------------------------------------------------
+
+func TestEscCancelsPendingG(t *testing.T) {
+	// `g` arms a pending gg; any non-g key (here esc) cancels it WITHOUT
+	// leaving results — selection and focus stay put.
+	m := keys(results(t), "j", "g", "esc")
+	if m.focus != focusResults {
+		t.Fatalf("esc after g should stay in results, got %d", m.focus)
+	}
+	if m.gPending {
+		t.Fatalf("pending g should be cleared")
+	}
+	if m.selectedIndex != 1 {
+		t.Fatalf("selection should be unchanged at 1, got %d", m.selectedIndex)
+	}
+}
+
+func TestEscCancelsPendingOperator(t *testing.T) {
+	// `d` arms an operator; esc is not a motion, so it cancels with no edit.
+	m := keys(results(t), "d", "esc")
+	wantBuf(t, m, cmd0)
+	if m.pending != "" {
+		t.Fatalf("pending operator should clear, got %q", m.pending)
+	}
+	if m.focus != focusResults {
+		t.Fatalf("operator-cancel should stay in results, got %d", m.focus)
+	}
+}
+
+func TestEscDiscardsPendingCountAndLeaves(t *testing.T) {
+	// A half-typed count is discarded by esc, which then leaves to search.
+	m := keys(results(t), "2", "esc")
+	if m.focus != focusSearch {
+		t.Fatalf("esc with pending count should reach search, got %d", m.focus)
+	}
+	if m.count != "" {
+		t.Fatalf("pending count should be cleared, got %q", m.count)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Ex command line (:w :wq :x :q :q!) — typing, dispatch, errors
+// ---------------------------------------------------------------------------
+
+func TestCommandLineBuildsAndBackspaces(t *testing.T) {
+	m := keys(results(t), ":", "w", "q")
+	if m.commandLine != "wq" {
+		t.Fatalf("command line = %q, want %q", m.commandLine, "wq")
+	}
+	m = keys(m, "backspace")
+	if m.commandLine != "w" {
+		t.Fatalf("after backspace = %q, want %q", m.commandLine, "w")
+	}
+}
+
+func TestBackspacePastStartLeavesCommandMode(t *testing.T) {
+	m := keys(results(t), ":", "backspace")
+	if m.commandMode {
+		t.Fatalf("backspace on empty command line should exit command mode")
+	}
+}
+
+func TestWriteStaysOpenAndClearsDirty(t *testing.T) {
+	m := keys(results(t), "d", "d", ":", "w", "enter")
+	if m.dirty {
+		t.Fatalf(":w should clear dirty")
+	}
+	if m.statusMsg != "written" {
+		t.Fatalf(":w status = %q, want 'written'", m.statusMsg)
+	}
+	if m.executed != "" {
+		t.Fatalf(":w must not quit/run, executed=%q", m.executed)
+	}
+}
+
+func TestWriteQuitSavesAndClearsDirty(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	m := keys(*New([]string{cmd1, cmd0}, core.AliasIndex{}), "ctrl+j", "d", "d", ":", "w", "q", "enter")
+	if m.dirty {
+		t.Fatalf(":wq should clear dirty")
+	}
+	reloaded := *New([]string{cmd1, cmd0}, core.AliasIndex{})
+	if len(reloaded.commands) != 1 {
+		t.Fatalf(":wq should persist deletion, got %v", reloaded.commands)
+	}
+}
+
+func TestXIsWriteQuitAlias(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	keys(*New([]string{cmd1, cmd0}, core.AliasIndex{}), "ctrl+j", "d", "d", ":", "x", "enter")
+	reloaded := *New([]string{cmd1, cmd0}, core.AliasIndex{})
+	if len(reloaded.commands) != 1 {
+		t.Fatalf(":x should persist like :wq, got %v", reloaded.commands)
+	}
+}
+
+func TestCleanQuitDoesNotWarn(t *testing.T) {
+	m := keys(results(t), ":", "q", "enter")
+	if m.statusMsg != "" {
+		t.Fatalf("clean :q should not warn, got %q", m.statusMsg)
+	}
+}
+
+func TestUnknownExCommandReportsError(t *testing.T) {
+	m := keys(results(t), ":", "z", "z", "z", "enter")
+	if m.statusMsg == "" {
+		t.Fatalf("unknown :command should set an error status")
+	}
+	if m.commandMode {
+		t.Fatalf("command mode should close after dispatch")
+	}
+	if m.executed != "" {
+		t.Fatalf("unknown command must not run, executed=%q", m.executed)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// End-to-end mode round-trips
+// ---------------------------------------------------------------------------
+
+func TestRoundTripSearchResultsInsertSearch(t *testing.T) {
+	m := newModel(t)
+	if m.focus != focusSearch {
+		t.Fatalf("start in search, got %d", m.focus)
+	}
+	m = keys(m, "ctrl+j") // -> results/normal
+	m = keys(m, "i", "X") // -> insert, type
+	m = keys(m, "esc")    // -> normal
+	if m.mode != modeNormal {
+		t.Fatalf("expected normal after esc, got %d", m.mode)
+	}
+	m = keys(m, "esc") // -> search
+	if m.focus != focusSearch {
+		t.Fatalf("expected search after second esc, got %d", m.focus)
+	}
+}
+
+func TestEnterFromInsertRunsEditedCommand(t *testing.T) {
+	m := keys(results(t), "A", " ", "-", "v", "enter")
+	if m.executed != "go build ./... -v" {
+		t.Fatalf("enter from insert should run edited buffer, got %q", m.executed)
+	}
+}
+
+func TestEnterFromVisualRunsBuffer(t *testing.T) {
+	m := keys(results(t), "v", "l", "enter")
+	if m.executed != cmd0 {
+		t.Fatalf("enter from visual should run buffer, got %q", m.executed)
+	}
+}
