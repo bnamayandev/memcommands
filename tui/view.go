@@ -122,31 +122,14 @@ func (m model) renderIndexedCommands(width int) string {
 		aliasing := selected && m.aliasing
 		editing := selected && m.focus == focusResults && !m.aliasing
 
-		var text string
-		if editing {
-			text = m.renderEditLine()
-		} else {
-			resolved := m.resolve(m.commands[i])
-			text = highlightMatch(resolved, core.MatchPositions(query, resolved), m.styles.match)
-		}
-
-		prefix := m.aliasPrefix(m.commands[i])
-		if aliasing {
-			prefix = m.aliasEditPrefix()
-		}
-
 		if selected {
-			// The whole row gets a single uniform style so the highlight
-			// fills the block and there are no color gaps.
-			line := fmt.Sprintf("❯ %2d %s%s", i+1, prefix, text)
-			if width > 0 {
-				line = ansi.Truncate(line, width, "…")
-			}
-			lines = append(lines, m.styles.selectedRow.Width(width).Render(line))
+			lines = append(lines, m.renderSelectedRow(i, query, editing, aliasing, width))
 			continue
 		}
 
-		line := m.styles.index.Render(fmt.Sprintf("  %2d ", i+1)) + prefix + text
+		resolved := m.resolve(m.commands[i])
+		text := highlightMatch(resolved, core.MatchPositions(query, resolved), lipgloss.NewStyle(), m.styles.match)
+		line := m.styles.index.Render(fmt.Sprintf("  %2d ", i+1)) + m.aliasPrefix(m.commands[i]) + text
 		if width > 0 {
 			line = ansi.Truncate(line, width, "…")
 		}
@@ -155,26 +138,62 @@ func (m model) renderIndexedCommands(width int) string {
 	return strings.Join(lines, "\n")
 }
 
+func (m model) renderSelectedRow(i int, query string, editing, aliasing bool, width int) string {
+	base := m.styles.selectedRow
+
+	var content string
+	if editing {
+		content = m.renderEditLine(base)
+	} else {
+		resolved := m.resolve(m.commands[i])
+		content = highlightMatch(resolved, core.MatchPositions(query, resolved), base, base.Foreground(lipgloss.Color(colPeach)))
+	}
+
+	var prefix string
+	switch {
+	case aliasing:
+		prefix = m.aliasEditPrefix()
+	case m.aliasTagText(m.commands[i]) != "":
+		prefix = base.Italic(true).Foreground(lipgloss.Color(colGreen)).Render(m.aliasTagText(m.commands[i])) + base.Render(" ")
+	}
+
+	row := base.Render(fmt.Sprintf("❯ %2d ", i+1)) + prefix + content
+	if width > 0 {
+		row = ansi.Truncate(row, width, "…")
+		if pad := width - ansi.StringWidth(row); pad > 0 {
+			row += base.Render(strings.Repeat(" ", pad))
+		}
+	}
+	return row
+}
+
 func (m model) aliasEditPrefix() string {
 	return m.styles.alias.Render("<") + m.aliasInput.View() + m.styles.alias.Render(">") + " "
 }
 
 func (m model) aliasPrefix(command string) string {
+	tags := m.aliasTagText(command)
+	if tags == "" {
+		return ""
+	}
+	return m.styles.alias.Render(tags) + " "
+}
+
+func (m model) aliasTagText(command string) string {
 	labels := core.AliasesForCommand(command, m.aliases)
 	if len(labels) == 0 {
 		return ""
 	}
-
 	tags := make([]string, len(labels))
 	for i, label := range labels {
 		tags[i] = "<" + label + ">"
 	}
-	return m.styles.alias.Render(strings.Join(tags, " ")) + " "
+	return strings.Join(tags, " ")
 }
 
-func highlightMatch(text string, positions []int, style lipgloss.Style) string {
+func highlightMatch(text string, positions []int, base, match lipgloss.Style) string {
 	if len(positions) == 0 {
-		return text
+		return base.Render(text)
 	}
 
 	set := make(map[int]struct{}, len(positions))
@@ -185,53 +204,44 @@ func highlightMatch(text string, positions []int, style lipgloss.Style) string {
 	var b strings.Builder
 	for i, r := range text {
 		if _, ok := set[i]; ok {
-			b.WriteString(style.Render(string(r)))
+			b.WriteString(match.Render(string(r)))
 		} else {
-			b.WriteRune(r)
+			b.WriteString(base.Render(string(r)))
 		}
 	}
 	return b.String()
 }
 
-func (m model) renderEditLine() string {
+func (m model) renderEditLine(base lipgloss.Style) string {
 	if m.mode == modeVisual {
 		start, end := m.visualRange()
+		visual := base.Background(lipgloss.Color(colBlue)).Foreground(lipgloss.Color(colBase))
 		var b strings.Builder
 		for i, r := range m.editBuffer {
 			if i >= start && i < end {
-				b.WriteString(m.styles.visual.Render(string(r)))
+				b.WriteString(visual.Render(string(r)))
 			} else {
-				b.WriteRune(r)
+				b.WriteString(base.Render(string(r)))
 			}
 		}
 		return b.String()
 	}
 
+	cursor := base.Reverse(true)
 	if m.mode == modeInsert {
-		var b strings.Builder
-		for i, r := range m.editBuffer {
-			if i == m.cursor {
-				b.WriteString(m.styles.cursorBar.Render(string(r)))
-			} else {
-				b.WriteRune(r)
-			}
-		}
-		if m.cursor >= len(m.editBuffer) {
-			b.WriteString(m.styles.cursorBar.Render(" "))
-		}
-		return b.String()
+		cursor = base.Underline(true)
 	}
 
 	var b strings.Builder
 	for i, r := range m.editBuffer {
 		if i == m.cursor {
-			b.WriteString(m.styles.cursor.Render(string(r)))
+			b.WriteString(cursor.Render(string(r)))
 		} else {
-			b.WriteRune(r)
+			b.WriteString(base.Render(string(r)))
 		}
 	}
 	if m.cursor >= len(m.editBuffer) {
-		b.WriteString(m.styles.cursor.Render(" "))
+		b.WriteString(cursor.Render(" "))
 	}
 	return b.String()
 }
