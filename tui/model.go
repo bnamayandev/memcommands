@@ -61,6 +61,17 @@ type model struct {
 
 	deleted   map[string]string
 	undoStack []string
+	// edited maps a command's normalized key to its rewritten text, so in-place
+	// buffer edits survive navigation and (after :w) restarts.
+	edited map[string]string
+
+	// vim-style ":" command line; commandLine is the text after the colon.
+	commandMode bool
+	commandLine string
+	// statusMsg is a transient message shown until the next normal-mode key.
+	statusMsg string
+	// dirty marks staged aliases/deletions not yet written to disk.
+	dirty bool
 }
 
 func New(commands []string, aliases core.AliasIndex) *model {
@@ -95,6 +106,7 @@ func New(commands []string, aliases core.AliasIndex) *model {
 		aliasInput:  aliasInput,
 		userAliases: userAliases,
 		deleted:     deleted,
+		edited:      core.LoadEditedCommands(),
 		styles:      DefaultStyles(),
 		focus:       focusSearch,
 	}
@@ -146,6 +158,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.aliasing {
 			return m.updateAlias(msg)
+		}
+		if m.commandMode {
+			return m.updateCommand(msg)
 		}
 		if m.focus == focusSearch {
 			return m.updateSearch(msg)
@@ -220,6 +235,7 @@ func (m *model) ensureVisible() {
 }
 
 func (m *model) leaveResults() {
+	m.commitEdit()
 	m.focus = focusSearch
 	m.mode = modeNormal
 	m.pending = ""
@@ -231,9 +247,49 @@ func (m *model) leaveResults() {
 func (m *model) loadEditBuffer() {
 	m.editBuffer = nil
 	if m.selectedIndex >= 0 && m.selectedIndex < len(m.commands) {
-		m.editBuffer = []rune(m.commands[m.selectedIndex])
+		m.editBuffer = []rune(m.resolve(m.commands[m.selectedIndex]))
 	}
 	m.cursor = 0
+}
+
+// resolve returns the edited text for a command if one is staged, else the
+// command itself.
+func (m model) resolve(command string) string {
+	if text, ok := m.edited[core.NormalizeCommandKey(command)]; ok {
+		return text
+	}
+	return command
+}
+
+// commitEdit stages the current edit buffer against the selected command. It
+// runs whenever we're about to leave the buffer (navigate, run, :command) so an
+// in-place edit isn't lost. A buffer matching the original clears the overlay;
+// an empty buffer is ignored so a command can't be blanked out.
+func (m *model) commitEdit() {
+	if m.focus != focusResults || m.selectedIndex < 0 || m.selectedIndex >= len(m.commands) {
+		return
+	}
+	original := m.commands[m.selectedIndex]
+	key := core.NormalizeCommandKey(original)
+	text := string(m.editBuffer)
+
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	if text == original {
+		if _, ok := m.edited[key]; ok {
+			delete(m.edited, key)
+			m.dirty = true
+		}
+		return
+	}
+	if m.edited == nil {
+		m.edited = make(map[string]string)
+	}
+	if m.edited[key] != text {
+		m.edited[key] = text
+		m.dirty = true
+	}
 }
 
 func (m *model) refreshCommands() {
@@ -269,6 +325,8 @@ func (m model) run(command string) (tea.Model, tea.Cmd) {
 	if strings.TrimSpace(command) == "" {
 		return m, nil
 	}
+	// Running exits the app, so persist staged curation on the way out.
+	m.save()
 	m.executed = command
 	clearScreen()
 	return m, tea.Quit

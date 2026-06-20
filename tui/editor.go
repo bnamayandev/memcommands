@@ -142,11 +142,82 @@ func (m *model) saveAlias() bool {
 		m.userAliases = make(map[string]string)
 	}
 	m.userAliases[alias] = target
-	_ = core.SaveUserAliases(m.userAliases)
+	m.dirty = true
 	m.aliases.ByFullCommand = core.BuildUserAliasIndex(m.userAliases)
 	m.corpus = core.NewCorpus(m.history, m.aliases)
 	m.refreshCommands()
 	return true
+}
+
+// updateCommand drives the ":" line: enter executes, esc/backspace-past-start
+// cancels, everything else appends.
+func (m model) updateCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m.quit()
+	case "esc":
+		m.commandMode = false
+		m.commandLine = ""
+		return m, nil
+	case "enter":
+		return m.runExCommand()
+	case "backspace":
+		if m.commandLine == "" {
+			m.commandMode = false
+			return m, nil
+		}
+		r := []rune(m.commandLine)
+		m.commandLine = string(r[:len(r)-1])
+		return m, nil
+	}
+
+	switch msg.Type {
+	case tea.KeySpace:
+		m.commandLine += " "
+	case tea.KeyRunes:
+		m.commandLine += string(msg.Runes)
+	}
+	return m, nil
+}
+
+// runExCommand interprets the typed ":" command; unknown ones report an error.
+func (m model) runExCommand() (tea.Model, tea.Cmd) {
+	cmd := strings.TrimSpace(m.commandLine)
+	m.commandMode = false
+	m.commandLine = ""
+
+	switch cmd {
+	case "w":
+		m.save()
+		m.statusMsg = "written"
+		return m, nil
+	case "wq", "x":
+		m.save()
+		return m.quit()
+	case "q":
+		if m.dirty {
+			m.statusMsg = "unsaved changes — :w to save or :q! to discard"
+			return m, nil
+		}
+		return m.quit()
+	case "q!":
+		return m.quit()
+	default:
+		m.statusMsg = fmt.Sprintf("not a command: :%s", cmd)
+		return m, nil
+	}
+}
+
+// save flushes staged edits, deletions, and aliases to disk.
+func (m *model) save() {
+	m.commitEdit()
+	if !m.dirty {
+		return
+	}
+	m.persistDeleted()
+	_ = core.SaveEditedCommands(m.edited)
+	_ = core.SaveUserAliases(m.userAliases)
+	m.dirty = false
 }
 
 func (m *model) closeAlias() {
@@ -184,6 +255,8 @@ func (m model) updateInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+	m.statusMsg = "" // any normal-mode key clears a transient message
+
 	if m.pending != "" {
 		return m.applyOperator(key), nil
 	}
@@ -301,6 +374,11 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "d", "c", "y":
 		m.pending = key
 		m.pendingCount = count
+	case ":":
+		m.commitEdit() // stage any pending edit so :w/:q see it
+		m.commandMode = true
+		m.commandLine = ""
+		m.statusMsg = ""
 	case "u":
 		m.undoDelete()
 	case "p":
@@ -317,6 +395,7 @@ func (m *model) setSelection(i int) {
 	if len(m.commands) == 0 {
 		return
 	}
+	m.commitEdit()
 	m.selectedIndex = max(0, min(i, len(m.commands)-1))
 	m.ensureVisible()
 	m.loadEditBuffer()
@@ -401,8 +480,8 @@ func (m *model) deleteSelected() {
 	}
 	m.deleted[key] = cmd
 	m.undoStack = append(m.undoStack, key)
+	m.dirty = true
 
-	m.persistDeleted()
 	m.refreshCommands()
 	m.loadEditBuffer()
 }
@@ -414,8 +493,8 @@ func (m *model) undoDelete() {
 	key := m.undoStack[len(m.undoStack)-1]
 	m.undoStack = m.undoStack[:len(m.undoStack)-1]
 	delete(m.deleted, key)
+	m.dirty = true
 
-	m.persistDeleted()
 	m.refreshCommands()
 	m.loadEditBuffer()
 }

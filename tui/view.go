@@ -126,7 +126,8 @@ func (m model) renderIndexedCommands(width int) string {
 		if editing {
 			text = m.renderEditLine()
 		} else {
-			text = highlightMatch(m.commands[i], core.MatchPositions(query, m.commands[i]), m.styles.match)
+			resolved := m.resolve(m.commands[i])
+			text = highlightMatch(resolved, core.MatchPositions(query, resolved), m.styles.match)
 		}
 
 		prefix := m.aliasPrefix(m.commands[i])
@@ -245,6 +246,13 @@ func (m model) statusBar() string {
 		return ansi.Truncate(badge+" "+hints, m.width, "…")
 	}
 
+	// The ":" command line takes over the status bar while typing.
+	if m.commandMode {
+		badge := m.styles.modeNormal.Render("COMMAND")
+		line := m.styles.cursorBar.Render(":" + m.commandLine + " ")
+		return ansi.Truncate(badge+" "+line, m.width, "…")
+	}
+
 	var badge, hints string
 	switch {
 	case m.focus == focusSearch:
@@ -258,7 +266,15 @@ func (m model) statusBar() string {
 		hints = "h/l 0 $ w b extend · y yank · d/x del · c change · esc cancel"
 	default:
 		badge = m.styles.modeNormal.Render("NORMAL")
-		hints = "j/k move · h/l 0 $ w b cursor · v visual · i/a edit · x dw cw del · dd remove · u undo · yy/y$ yank · p paste · m alias · enter run · esc search"
+		hints = "j/k move · i/a edit · dd remove · u undo · m alias · :w/:wq/:q save · enter run · esc search"
+	}
+
+	// A transient message or unsaved marker replaces the hints when present.
+	switch {
+	case m.statusMsg != "":
+		hints = m.statusMsg
+	case m.dirty:
+		hints = "[+] unsaved · " + hints
 	}
 
 	bar := badge + " " + m.styles.hints.Render(hints)

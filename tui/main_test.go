@@ -19,6 +19,8 @@ func keys(m model, ss ...string) model {
 			msg = tea.KeyMsg{Type: tea.KeyCtrlJ}
 		case "space":
 			msg = tea.KeyMsg{Type: tea.KeySpace}
+		case "backspace":
+			msg = tea.KeyMsg{Type: tea.KeyBackspace}
 		default:
 			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 		}
@@ -74,15 +76,119 @@ func TestUndoRestoresDeletedCommand(t *testing.T) {
 	}
 }
 
-func TestDeletedCommandStaysGoneOnReload(t *testing.T) {
+func TestDeleteIsStagedUntilWritten(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
+	// Delete without saving: the change is staged, not yet on disk.
 	keys(*New([]string{"git status", "go build ./..."}, core.AliasIndex{}), "ctrl+j", "d", "d")
+
+	unsaved := *New([]string{"git status", "go build ./..."}, core.AliasIndex{})
+	if len(unsaved.commands) != 2 {
+		t.Fatalf("staged deletion should not persist without :w, got %v", unsaved.commands)
+	}
+}
+
+func TestDeletedCommandStaysGoneAfterWrite(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	// :w writes the staged deletion to disk.
+	keys(*New([]string{"git status", "go build ./..."}, core.AliasIndex{}), "ctrl+j", "d", "d", ":", "w", "enter")
 
 	reloaded := *New([]string{"git status", "go build ./..."}, core.AliasIndex{})
 	if len(reloaded.commands) != 1 || reloaded.commands[0] != "git status" {
-		t.Fatalf("want deletion to persist, got %v", reloaded.commands)
+		t.Fatalf("want deletion to persist after :w, got %v", reloaded.commands)
+	}
+}
+
+func TestDirtyFlagSetAndCleared(t *testing.T) {
+	m := keys(newModel(t), "ctrl+j", "d", "d")
+	if !m.dirty {
+		t.Fatalf("expected dirty after delete")
+	}
+	m = keys(m, ":", "w", "enter")
+	if m.dirty {
+		t.Fatalf("expected clean after :w")
+	}
+	if m.statusMsg != "written" {
+		t.Fatalf("want 'written' status, got %q", m.statusMsg)
+	}
+}
+
+func TestQuitWarnsWhenDirty(t *testing.T) {
+	m := keys(newModel(t), "ctrl+j", "d", "d", ":", "q", "enter")
+	if m.executed != "" {
+		t.Fatalf("dirty :q should not run/quit")
+	}
+	if m.statusMsg == "" {
+		t.Fatalf("dirty :q should warn in status bar")
+	}
+}
+
+func TestForceQuitDiscardsStagedDeletion(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	keys(*New([]string{"git status", "go build ./..."}, core.AliasIndex{}), "ctrl+j", "d", "d", ":", "q", "!", "enter")
+
+	reloaded := *New([]string{"git status", "go build ./..."}, core.AliasIndex{})
+	if len(reloaded.commands) != 2 {
+		t.Fatalf(":q! should discard staged deletion, got %v", reloaded.commands)
+	}
+}
+
+func TestUndoPersistsThroughSession(t *testing.T) {
+	// Delete two, navigate around, then undo both — all in one session.
+	m := keys(newModel(t), "ctrl+j", "d", "d", "j", "d", "d", "k", "u", "u")
+	if len(m.commands) != 2 {
+		t.Fatalf("want both restored, got %v", m.commands)
+	}
+}
+
+func TestBufferEditSurvivesNavigation(t *testing.T) {
+	// Edit "go build ./..." down to "go build", move away, come back.
+	m := keys(newModel(t), "ctrl+j", "A")
+	for i := 0; i < len(" ./..."); i++ {
+		m = keys(m, "backspace")
+	}
+	m = keys(m, "esc", "j", "k")
+	if string(m.editBuffer) != "go build" {
+		t.Fatalf("edit should survive navigation, got %q", string(m.editBuffer))
+	}
+}
+
+func TestBufferEditPersistsAfterWrite(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	m := *New([]string{"git status", "go build ./..."}, core.AliasIndex{})
+	m = keys(m, "ctrl+j", "A")
+	for i := 0; i < len(" ./..."); i++ {
+		m = keys(m, "backspace")
+	}
+	m = keys(m, "esc", ":", "w", "enter")
+
+	reloaded := *New([]string{"git status", "go build ./..."}, core.AliasIndex{})
+	reloaded = keys(reloaded, "ctrl+j")
+	if string(reloaded.editBuffer) != "go build" {
+		t.Fatalf("edit should persist after :w, got %q", string(reloaded.editBuffer))
+	}
+}
+
+func TestRevertingEditClearsOverlay(t *testing.T) {
+	m := keys(newModel(t), "ctrl+j", "x", "j", "k")
+	if string(m.editBuffer) != "o build ./..." {
+		t.Fatalf("setup: want edited buffer, got %q", string(m.editBuffer))
+	}
+	// Put the deleted rune back; the overlay should drop the entry.
+	m = keys(m, "I", "g", "esc")
+	m = keys(m, "j", "k")
+	if string(m.editBuffer) != "go build ./..." {
+		t.Fatalf("reverting should restore original, got %q", string(m.editBuffer))
+	}
+	if _, ok := m.edited[core.NormalizeCommandKey("go build ./...")]; ok {
+		t.Fatalf("overlay entry should be cleared after revert")
 	}
 }
 
