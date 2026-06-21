@@ -88,10 +88,23 @@ func (m model) View() string {
 		resultsBorder = m.styles.FocusedBorder
 	}
 
+	searchContent := m.userInput.View()
+	if m.focus != focusSearch {
+		hint := m.styles.index.Render("(press 'ESC' to focus)")
+		gap := innerWidth - ansi.StringWidth(searchContent) - ansi.StringWidth(hint)
+		if gap >= 1 {
+			// Right-align the hint on the same line as the input.
+			searchContent += strings.Repeat(" ", gap) + hint
+		} else {
+			// Too narrow to right-align; keep both on one line with a space.
+			searchContent = ansi.Truncate(searchContent+" "+hint, innerWidth, "")
+		}
+	}
+
 	searchBlock := m.styles.block.
 		BorderForeground(searchBorder).
 		Width(contentWidth).
-		Render(m.userInput.View())
+		Render(searchContent)
 
 	resultsBlock := m.styles.block.
 		BorderForeground(resultsBorder).
