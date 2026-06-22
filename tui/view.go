@@ -181,7 +181,7 @@ func (m model) renderSelectedRow(i int, query string, editing, aliasing bool, wi
 }
 
 func (m model) aliasEditPrefix() string {
-	return m.styles.alias.Render("<") + m.aliasInput.View() + m.styles.alias.Render(">") + " "
+	return m.styles.alias.Render("[") + m.aliasInput.View() + m.styles.alias.Render("]") + " "
 }
 
 func (m model) aliasPrefix(command string) string {
@@ -199,7 +199,7 @@ func (m model) aliasTagText(command string) string {
 	}
 	tags := make([]string, len(labels))
 	for i, label := range labels {
-		tags[i] = "<" + label + ">"
+		tags[i] = "[" + label + "]"
 	}
 	return strings.Join(tags, " ")
 }
