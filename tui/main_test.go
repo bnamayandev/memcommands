@@ -17,6 +17,10 @@ func keys(m model, ss ...string) model {
 			msg = tea.KeyMsg{Type: tea.KeyEnter}
 		case "ctrl+j":
 			msg = tea.KeyMsg{Type: tea.KeyCtrlJ}
+		case "ctrl+p":
+			msg = tea.KeyMsg{Type: tea.KeyCtrlP}
+		case "ctrl+u":
+			msg = tea.KeyMsg{Type: tea.KeyCtrlU}
 		case "space":
 			msg = tea.KeyMsg{Type: tea.KeySpace}
 		case "backspace":
@@ -140,9 +144,23 @@ func TestForceQuitDiscardsStagedDeletion(t *testing.T) {
 
 func TestUndoPersistsThroughSession(t *testing.T) {
 	// Delete two, navigate around, then undo both — all in one session.
-	m := keys(newModel(t), "ctrl+j", "d", "d", "j", "d", "d", "k", "u", "u")
+	m := keys(newModel(t), "ctrl+j", "d", "d", "j", "d", "d", "j", "u", "u")
 	if len(m.commands) != 2 {
 		t.Fatalf("want both restored, got %v", m.commands)
+	}
+}
+
+func TestUpAtFirstRowReturnsToSearch(t *testing.T) {
+	// Pressing an up motion on row 1 falls back to the search bar, like esc.
+	for _, key := range []string{"k", "ctrl+p", "ctrl+u"} {
+		m := keys(newModel(t), "ctrl+j")
+		if m.focus != focusResults {
+			t.Fatalf("%s: expected to start in results", key)
+		}
+		m = keys(m, key)
+		if m.focus != focusSearch {
+			t.Fatalf("%s: expected up on row 1 to return to search, got focus %v", key, m.focus)
+		}
 	}
 }
 

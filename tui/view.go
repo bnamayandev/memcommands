@@ -106,10 +106,15 @@ func (m model) View() string {
 		Width(contentWidth).
 		Render(searchContent)
 
+	body := m.renderIndexedCommands(innerWidth)
+	if m.showHelp {
+		body = m.helpView(innerWidth)
+	}
+
 	resultsBlock := m.styles.block.
 		BorderForeground(resultsBorder).
 		Width(contentWidth).
-		Render(m.renderIndexedCommands(innerWidth))
+		Render(body)
 
 	return lipgloss.JoinVertical(
 		lipgloss.Left,
@@ -147,6 +152,79 @@ func (m model) renderIndexedCommands(width int) string {
 			line = ansi.Truncate(line, width, "…")
 		}
 		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// helpView renders the keybindings cheat-sheet shown while showHelp is set.
+func (m model) helpView(width int) string {
+	type binding struct{ keys, desc string }
+	type section struct {
+		title    string
+		bindings []binding
+	}
+
+	sections := []section{
+		{"Navigate", []binding{
+			{"j / k", "move down / up"},
+			{"ctrl+d / ctrl+u", "half page down / up"},
+			{"gg / G", "jump to top / bottom"},
+			{"{n}G", "jump to line n"},
+		}},
+		{"Edit command", []binding{
+			{"i / a", "insert before / after cursor"},
+			{"I / A", "insert at start / end"},
+			{"h / l", "move cursor left / right"},
+			{"0 / $", "cursor to start / end"},
+			{"w / b", "next / previous word"},
+			{"x", "delete character"},
+			{"d / c / y + motion", "delete / change / yank"},
+			{"v / V", "visual select / whole line"},
+			{"p / P", "paste after / before"},
+		}},
+		{"Curate", []binding{
+			{"dd", "remove command from history"},
+			{"u", "undo last removal"},
+			{"m", "set an alias for the command"},
+		}},
+		{"Save & run", []binding{
+			{"enter", "run the selected command"},
+			{":w / :wq", "save / save and quit"},
+			{":q / :q!", "quit / discard and quit"},
+			{"esc", "back to search"},
+		}},
+		{"Other", []binding{
+			{"?", "toggle this help"},
+			{"ctrl+c", "quit"},
+		}},
+	}
+
+	header := m.styles.match.Render("Keybindings")
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colBlue)).Bold(true)
+	titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colMauve)).Bold(true)
+
+	// Align descriptions to the widest key column.
+	keyCol := 0
+	for _, s := range sections {
+		for _, b := range s.bindings {
+			if len(b.keys) > keyCol {
+				keyCol = len(b.keys)
+			}
+		}
+	}
+
+	lines := []string{header, ""}
+	for _, s := range sections {
+		lines = append(lines, titleStyle.Render(s.title))
+		for _, b := range s.bindings {
+			keys := keyStyle.Render(b.keys) + strings.Repeat(" ", keyCol-len(b.keys))
+			line := "  " + keys + "  " + m.styles.hints.Render(b.desc)
+			if width > 0 {
+				line = ansi.Truncate(line, width, "…")
+			}
+			lines = append(lines, line)
+		}
+		lines = append(lines, "")
 	}
 	return strings.Join(lines, "\n")
 }
@@ -276,20 +354,26 @@ func (m model) statusBar() string {
 		return ansi.Truncate(badge+" "+line, m.width, "…")
 	}
 
+	if m.showHelp {
+		badge := m.styles.modeNormal.Render("HELP")
+		hints := m.styles.hints.Render("press any key to close")
+		return ansi.Truncate(badge+" "+hints, m.width, "…")
+	}
+
 	var badge, hints string
 	switch {
 	case m.focus == focusSearch:
 		badge = m.styles.modeSearch.Render("SEARCH")
-		hints = "enter run · ctrl+j/n focus results"
+		hints = "enter run · ctrl+j/n focus results · ? keybindings"
 	case m.mode == modeInsert:
 		badge = m.styles.modeInsert.Render("INSERT")
 		hints = "esc normal · enter run"
 	case m.mode == modeVisual:
 		badge = m.styles.modeVisual.Render("VISUAL")
-		hints = "h/l 0 $ w b extend · y yank · d/x del · c change · esc cancel"
+		hints = "press ? for keybindings · esc cancel"
 	default:
 		badge = m.styles.modeNormal.Render("NORMAL")
-		hints = "j/k move · i/a edit · dd remove · u undo · m alias · :w/:wq/:q save · enter run · esc search"
+		hints = "press ? for keybindings · esc search"
 	}
 
 	// A transient message or unsaved marker replaces the hints when present.

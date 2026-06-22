@@ -70,6 +70,9 @@ type model struct {
 	commandLine string
 	statusMsg   string // transient message shown until the next normal-mode key
 	dirty       bool   // staged aliases/deletions not yet written to disk
+
+	// showHelp overlays the keybindings cheat-sheet, toggled with "?".
+	showHelp bool
 }
 
 func New(commands []string, aliases core.AliasIndex) *model {
@@ -153,6 +156,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshCommands()
 		return m, nil
 	case tea.KeyMsg:
+		// While the help overlay is up, any key dismisses it (ctrl+c still quits).
+		if m.showHelp {
+			if msg.String() == "ctrl+c" {
+				return m.quit()
+			}
+			m.showHelp = false
+			return m, nil
+		}
 		if m.aliasing {
 			return m.updateAlias(msg)
 		}
@@ -192,6 +203,12 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.enterResults()
 		return m, nil
+	case "?":
+		// Open help on "?" only with an empty query, so it stays typeable mid-search.
+		if m.userInput.Value() == "" {
+			m.showHelp = true
+			return m, nil
+		}
 	}
 
 	var cmd tea.Cmd

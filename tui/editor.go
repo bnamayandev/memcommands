@@ -291,6 +291,8 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	count := m.takeCount()
 
 	switch key {
+	case "?":
+		m.showHelp = true
 	case "esc":
 		m.leaveResults()
 	case "G":
@@ -305,10 +307,19 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "j", "ctrl+j", "ctrl+n":
 		m.setSelection(m.selectedIndex + count)
 	case "k", "ctrl+k", "ctrl+p":
+		// Moving up past the first row returns to the search bar.
+		if m.selectedIndex == 0 {
+			m.leaveResults()
+			return m, nil
+		}
 		m.setSelection(m.selectedIndex - count)
 	case "ctrl+d":
 		m.setSelection(m.selectedIndex + maxResults)
 	case "ctrl+u":
+		if m.selectedIndex == 0 {
+			m.leaveResults()
+			return m, nil
+		}
 		m.setSelection(m.selectedIndex - maxResults)
 	case "h":
 		m.cursor -= count
