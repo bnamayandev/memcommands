@@ -73,6 +73,9 @@ type model struct {
 
 	// showHelp overlays the keybindings cheat-sheet, toggled with "?".
 	showHelp bool
+
+	// aliasFilter (ctrl+a) shows only aliased commands.
+	aliasFilter bool
 }
 
 func New(commands []string, aliases core.AliasIndex) *model {
@@ -203,6 +206,9 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.enterResults()
 		return m, nil
+	case "ctrl+a":
+		m.toggleAliasFilter()
+		return m, nil
 	case "?":
 		// Open help on "?" only with an empty query, so it stays typeable mid-search.
 		if m.userInput.Value() == "" {
@@ -312,6 +318,9 @@ func (m *model) refreshCommands() {
 		if _, ok := m.deleted[core.NormalizeCommandKey(s.Command)]; ok {
 			continue
 		}
+		if m.aliasFilter && !m.isAliased(s.Command) {
+			continue
+		}
 		m.commands = append(m.commands, s.Command)
 	}
 
@@ -324,6 +333,23 @@ func (m *model) refreshCommands() {
 		m.selectedIndex = len(m.commands) - 1
 	}
 	m.ensureVisible()
+}
+
+// isAliased reports whether a command carries a user-defined alias label.
+func (m model) isAliased(command string) bool {
+	return len(core.AliasesForCommand(command, m.aliases)) > 0
+}
+
+// toggleAliasFilter flips the aliased-only filter and rebuilds the result list.
+func (m *model) toggleAliasFilter() {
+	if m.focus == focusResults {
+		m.commitEdit()
+	}
+	m.aliasFilter = !m.aliasFilter
+	m.refreshCommands()
+	if m.focus == focusResults {
+		m.loadEditBuffer()
+	}
 }
 
 func (m model) firstCommand() string {

@@ -186,6 +186,7 @@ func (m model) helpView(width int) string {
 			{"dd", "remove command from history"},
 			{"u", "undo last removal"},
 			{"m", "set an alias for the command"},
+			{"ctrl+a", "toggle aliased-only view"},
 		}},
 		{"Save & run", []binding{
 			{"enter", "run the selected command"},
@@ -364,7 +365,7 @@ func (m model) statusBar() string {
 	switch {
 	case m.focus == focusSearch:
 		badge = m.styles.modeSearch.Render("SEARCH")
-		hints = "enter run · ctrl+j/n focus results · ? keybindings"
+		hints = "enter run · ctrl+j/n focus results · ctrl+a aliased · ? keybindings"
 	case m.mode == modeInsert:
 		badge = m.styles.modeInsert.Render("INSERT")
 		hints = "esc normal · enter run"
@@ -382,6 +383,9 @@ func (m model) statusBar() string {
 		hints = m.statusMsg
 	case m.dirty:
 		hints = "[+] unsaved · " + hints
+	}
+	if m.aliasFilter {
+		hints = "[aliased] · " + hints
 	}
 
 	bar := badge + " " + m.styles.hints.Render(hints)

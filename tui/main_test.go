@@ -15,6 +15,8 @@ func keys(m model, ss ...string) model {
 			msg = tea.KeyMsg{Type: tea.KeyEsc}
 		case "enter":
 			msg = tea.KeyMsg{Type: tea.KeyEnter}
+		case "ctrl+a":
+			msg = tea.KeyMsg{Type: tea.KeyCtrlA}
 		case "ctrl+j":
 			msg = tea.KeyMsg{Type: tea.KeyCtrlJ}
 		case "ctrl+p":
@@ -278,5 +280,26 @@ func TestEscFromNormalReturnsToSearch(t *testing.T) {
 	m := keys(newModel(t), "ctrl+j", "esc")
 	if m.focus != focusSearch {
 		t.Fatalf("expected to return to search focus")
+	}
+}
+
+func TestAliasFilterShowsOnlyAliased(t *testing.T) {
+	// Alias cmd0, then toggle the aliased-only view.
+	m := keys(newModel(t), "ctrl+j", "m", "g", "s", "enter", "esc")
+	if len(m.commands) != 2 {
+		t.Fatalf("want 2 commands before filter, got %d", len(m.commands))
+	}
+
+	m = keys(m, "ctrl+a")
+	if !m.aliasFilter {
+		t.Fatalf("aliasFilter should be on")
+	}
+	if len(m.commands) != 1 || m.commands[0] != cmd0 {
+		t.Fatalf("want only aliased %q, got %v", cmd0, m.commands)
+	}
+
+	m = keys(m, "ctrl+a")
+	if m.aliasFilter || len(m.commands) != 2 {
+		t.Fatalf("toggle off should restore all, got filter=%v n=%d", m.aliasFilter, len(m.commands))
 	}
 }

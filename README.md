@@ -21,6 +21,8 @@ the one you want, tweak it in place with the Vim motions you already know, hit
   box and give it a memorable label. Your aliases are saved to
   `~/.config/memcommands/aliases.json` and become searchable — type the label
   and the command surfaces.
+- 🎚️ **Aliased-only view.** Press `Ctrl-a` (in search or the list) to toggle
+  between showing everything and showing only commands you've aliased.
 - ✏️ **Edit before you run.** Highlight a command and modify it with Vim
   keybindings — change a flag, fix a path, swap an argument — without retyping
   the whole line.
@@ -54,6 +56,7 @@ Launch it and you land in the **search** box. Type to filter your history.
 | _type_ | Fuzzy-filter the history |
 | `Enter` | Run the top match |
 | `Ctrl-j` / `Ctrl-n` / `Ctrl-k` / `Ctrl-p` | Drop into the results list |
+| `Ctrl-a` | Toggle the aliased-only view |
 | `Ctrl-c` | Quit |
 
 ### 📋 Results (Normal mode)
@@ -73,6 +76,7 @@ Once you're in the list, you're in Vim **normal mode** on the selected command.
 | `v` / `V` | Enter visual mode (`V` selects the whole line) |
 | `p` / `P` | Paste after / before cursor |
 | `m` | Open the floating box to alias the selected command |
+| `Ctrl-a` | Toggle the aliased-only view |
 | `Enter` | Run the (possibly edited) command |
 | `Esc` | Back to search |
 | `Ctrl-c` | Quit |

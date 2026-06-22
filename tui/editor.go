@@ -18,6 +18,10 @@ func (m model) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		return m.quit()
 	}
+	if msg.String() == "ctrl+a" {
+		m.toggleAliasFilter()
+		return m, nil
+	}
 	switch m.mode {
 	case modeInsert:
 		return m.updateInsert(msg)
