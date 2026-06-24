@@ -74,6 +74,9 @@ type model struct {
 	// showHelp overlays the keybindings cheat-sheet, toggled with "?".
 	showHelp bool
 
+	// confirmQuit shows the unsaved-changes prompt raised on ctrl+c.
+	confirmQuit bool
+
 	// aliasFilter (ctrl+a) shows only aliased commands.
 	aliasFilter bool
 }
@@ -159,10 +162,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.refreshCommands()
 		return m, nil
 	case tea.KeyMsg:
-		// While the help overlay is up, any key dismisses it (ctrl+c still quits).
+		if m.confirmQuit {
+			return m.updateConfirmQuit(msg)
+		}
+		// While the help overlay is up, any key dismisses it.
 		if m.showHelp {
 			if msg.String() == "ctrl+c" {
-				return m.quit()
+				return m.requestQuit()
 			}
 			m.showHelp = false
 			return m, nil
@@ -197,7 +203,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
-		return m.quit()
+		return m.requestQuit()
 	case "enter":
 		return m.run(m.firstCommand())
 	case "ctrl+j", "ctrl+n", "ctrl+k", "ctrl+p":
@@ -373,4 +379,28 @@ func (m model) run(command string) (tea.Model, tea.Cmd) {
 func (m model) quit() (tea.Model, tea.Cmd) {
 	clearScreen()
 	return m, tea.Quit
+}
+
+// requestQuit prompts before quitting when there are unsaved changes.
+func (m model) requestQuit() (tea.Model, tea.Cmd) {
+	m.commitEdit()
+	if m.dirty {
+		m.confirmQuit = true
+		m.showHelp = false
+		return m, nil
+	}
+	return m.quit()
+}
+
+func (m model) updateConfirmQuit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "s", "enter":
+		m.save()
+		return m.quit()
+	case "d":
+		return m.quit()
+	case "esc", "ctrl+c":
+		m.confirmQuit = false
+	}
+	return m, nil
 }

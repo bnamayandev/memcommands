@@ -110,6 +110,9 @@ func (m model) View() string {
 	if m.showHelp {
 		body = m.helpView(innerWidth)
 	}
+	if m.confirmQuit {
+		body = m.confirmQuitView(innerWidth)
+	}
 
 	resultsBlock := m.styles.block.
 		BorderForeground(resultsBorder).
@@ -230,6 +233,30 @@ func (m model) helpView(width int) string {
 	return strings.Join(lines, "\n")
 }
 
+func (m model) confirmQuitView(width int) string {
+	title := lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach)).Bold(true).Render("⚠  Unsaved changes")
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colBlue)).Bold(true)
+	opt := func(key, desc string) string {
+		return "  " + keyStyle.Render(key) + "  " + m.styles.hints.Render(desc)
+	}
+
+	lines := []string{
+		title,
+		"",
+		m.styles.hints.Render("You have changes that haven't been saved."),
+		"",
+		opt("s / enter", "save and exit"),
+		opt("d", "exit without saving"),
+		opt("esc", "return"),
+	}
+	for i, line := range lines {
+		if width > 0 {
+			lines[i] = ansi.Truncate(line, width, "…")
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (m model) renderSelectedRow(i int, query string, editing, aliasing bool, width int) string {
 	base := m.styles.selectedRow
 
@@ -339,6 +366,12 @@ func (m model) renderEditLine(base lipgloss.Style) string {
 }
 
 func (m model) statusBar() string {
+	if m.confirmQuit {
+		badge := m.styles.modeNormal.Background(lipgloss.Color(colRed)).Render("CONFIRM")
+		hints := m.styles.hints.Render("s save & exit · d exit anyway · esc return")
+		return ansi.Truncate(badge+" "+hints, m.width, "…")
+	}
+
 	if m.aliasing {
 		badge := m.styles.modeInsert.Render("ALIAS")
 		hints := m.styles.hints.Render("enter save · esc cancel")
@@ -365,16 +398,16 @@ func (m model) statusBar() string {
 	switch {
 	case m.focus == focusSearch:
 		badge = m.styles.modeSearch.Render("SEARCH")
-		hints = "enter run · ctrl+j/n focus results · ctrl+a aliased · ? keybindings"
+		hints = "enter run · ? help"
 	case m.mode == modeInsert:
 		badge = m.styles.modeInsert.Render("INSERT")
-		hints = "esc normal · enter run"
+		hints = "esc normal · ? help"
 	case m.mode == modeVisual:
 		badge = m.styles.modeVisual.Render("VISUAL")
-		hints = "press ? for keybindings · esc cancel"
+		hints = "esc cancel · ? help"
 	default:
 		badge = m.styles.modeNormal.Render("NORMAL")
-		hints = "press ? for keybindings · esc search"
+		hints = "esc search · ? help"
 	}
 
 	// A transient message or unsaved marker replaces the hints when present.

@@ -16,7 +16,7 @@ func clearScreen() {
 
 func (m model) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
-		return m.quit()
+		return m.requestQuit()
 	}
 	if msg.String() == "ctrl+a" {
 		m.toggleAliasFilter()
@@ -110,7 +110,7 @@ func (m model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) updateAlias(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
-		return m.quit()
+		return m.requestQuit()
 	case "esc":
 		m.closeAlias()
 		return m, nil
@@ -157,7 +157,7 @@ func (m *model) saveAlias() bool {
 func (m model) updateCommand(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c":
-		return m.quit()
+		return m.requestQuit()
 	case "esc":
 		m.commandMode = false
 		m.commandLine = ""
