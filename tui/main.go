@@ -1,13 +1,12 @@
 package main
 
 import (
-	"errors"
 	"log"
 	"memcommands/core"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -37,26 +36,25 @@ func main() {
 		return
 	}
 
-	if err := shellCommand(final.executed, final.aliases).Run(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			os.Exit(exitErr.ExitCode())
-		}
+	// Replace this process so the command gets sole ownership of stdin.
+	if err := runShellCommand(final.executed, final.aliases); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func shellCommand(command string, aliases core.AliasIndex) *exec.Cmd {
+func runShellCommand(command string, aliases core.AliasIndex) error {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
 	}
 
-	cmd := exec.Command(shell, "-lc", core.ExpandAliasCommand(command, aliases))
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd
+	// Bubble Tea can leave the tty non-blocking; clear it so the command's reads block.
+	for _, fd := range []int{0, 1, 2} {
+		_ = syscall.SetNonblock(fd, false)
+	}
+
+	args := []string{shell, "-lc", core.ExpandAliasCommand(command, aliases)}
+	return syscall.Exec(shell, args, os.Environ())
 }
 
 func commandName(command string) string {
