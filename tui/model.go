@@ -39,14 +39,21 @@ type model struct {
 	userInput     textinput.Model
 	styles        *Styles
 
-	focus      focusState
-	mode       vimMode
-	editBuffer []rune
-	cursor     int
+	focus        focusState
+	mode         vimMode
+	editBuffer   []rune
+	cursor       int
 	pending      string
 	pendingCount int
 	count        string
 	gPending     bool
+	// rPending arms `r`: the next key replaces the char(s) under the cursor.
+	rPending bool
+	// findPending holds an armed f/F/t/T awaiting its target; findCount is its count; lastFindCmd/lastFindChar back ;/, repeats.
+	findPending  string
+	findCount    int
+	lastFindCmd  string
+	lastFindChar rune
 	// visualAnchor is the fixed end of the visual selection; the other end follows
 	// the cursor.
 	visualAnchor int
@@ -235,6 +242,8 @@ func (m *model) enterResults() {
 	m.pending = ""
 	m.count = ""
 	m.gPending = false
+	m.rPending = false
+	m.findPending = ""
 	m.userInput.Blur()
 
 	if m.selectedIndex >= len(m.commands) {
@@ -267,6 +276,8 @@ func (m *model) leaveResults() {
 	m.pending = ""
 	m.count = ""
 	m.gPending = false
+	m.rPending = false
+	m.findPending = ""
 	m.userInput.Focus()
 }
 

@@ -169,6 +169,49 @@ func TestDeleteCharOnEmptyBufferIsSafe(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// r / replace-char
+// ---------------------------------------------------------------------------
+
+func TestReplaceCharUnderCursor(t *testing.T) {
+	m := keys(results(t), "r", "X")
+	wantBuf(t, m, "Xo build ./...")
+	wantCursor(t, m, 0) // cursor stays on the replaced char
+}
+
+func TestReplaceCharAtCursorPosition(t *testing.T) {
+	m := keys(results(t), "l", "l", "l", "r", "Z")
+	wantBuf(t, m, "go Zuild ./...")
+	wantCursor(t, m, 3)
+}
+
+func TestReplaceCountChars(t *testing.T) {
+	m := keys(results(t), "3", "r", "X")
+	wantBuf(t, m, "XXXbuild ./...") // overwrites "go " (incl. the space)
+	wantCursor(t, m, 2)             // cursor lands on the last replaced char
+}
+
+func TestReplaceCountPastEndIsNoop(t *testing.T) {
+	m := keys(results(t), "$", "3", "r", "X") // only one char left under cursor
+	wantBuf(t, m, cmd0)
+}
+
+func TestReplaceWithSpace(t *testing.T) {
+	m := keys(results(t), "r", " ")
+	wantBuf(t, m, " o build ./...")
+}
+
+func TestReplaceEscCancels(t *testing.T) {
+	m := keys(results(t), "r", "esc")
+	wantBuf(t, m, cmd0)
+	if m.rPending {
+		t.Fatalf("pending r should clear after esc")
+	}
+	if m.mode != modeNormal {
+		t.Fatalf("r esc should stay in normal mode, got %d", m.mode)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Operators: d / c / y
 // ---------------------------------------------------------------------------
 
@@ -217,6 +260,126 @@ func TestOperatorWithBadMotionIsNoop(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// e / word-end motion and operator
+// ---------------------------------------------------------------------------
+
+func TestWordEndMotion(t *testing.T) {
+	m := keys(results(t), "e")
+	wantCursor(t, m, 1) // end of "go"
+	m = keys(m, "e")
+	wantCursor(t, m, 7) // end of "build"
+	m = keys(m, "e")
+	wantCursor(t, m, len(cmd0)-1)
+}
+
+func TestDeleteToWordEnd(t *testing.T) {
+	m := keys(results(t), "d", "e") // delete "go" inclusive
+	wantBuf(t, m, " build ./...")
+}
+
+func TestChangeToWordEndEntersInsert(t *testing.T) {
+	m := keys(results(t), "c", "e", "X")
+	if m.mode != modeInsert {
+		t.Fatalf("ce should enter insert, got %d", m.mode)
+	}
+	wantBuf(t, m, "X build ./...")
+}
+
+// ---------------------------------------------------------------------------
+// f / F / t / T find-char and ; , repeat
+// ---------------------------------------------------------------------------
+
+func TestFindCharForward(t *testing.T) {
+	m := keys(results(t), "f", "b")
+	wantCursor(t, m, 3)
+}
+
+func TestFindCharNotFoundStaysPut(t *testing.T) {
+	m := keys(results(t), "f", "z")
+	wantCursor(t, m, 0)
+}
+
+func TestTillCharForward(t *testing.T) {
+	m := keys(results(t), "t", "b")
+	wantCursor(t, m, 2) // one before 'b'
+}
+
+func TestFindCharBackward(t *testing.T) {
+	m := keys(results(t), "$", "F", "b")
+	wantCursor(t, m, 3)
+}
+
+func TestFindRepeatAndReverse(t *testing.T) {
+	m := keys(results(t), "f", ".") // first '.' at index 9
+	wantCursor(t, m, 9)
+	m = keys(m, ";") // next '.'
+	wantCursor(t, m, 11)
+	m = keys(m, ",") // reverse back
+	wantCursor(t, m, 9)
+}
+
+func TestFindEscCancels(t *testing.T) {
+	m := keys(results(t), "f", "esc")
+	wantCursor(t, m, 0)
+	if m.findPending != "" {
+		t.Fatalf("pending find should clear after esc")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// D / C / s / S / X / ~ / Y
+// ---------------------------------------------------------------------------
+
+func TestDeleteToEndShortcut(t *testing.T) {
+	m := keys(results(t), "l", "l", "l", "D")
+	wantBuf(t, m, "go ")
+}
+
+func TestChangeToEndShortcut(t *testing.T) {
+	m := keys(results(t), "l", "l", "l", "C", "X")
+	if m.mode != modeInsert {
+		t.Fatalf("C should enter insert, got %d", m.mode)
+	}
+	wantBuf(t, m, "go X")
+}
+
+func TestSubstituteChar(t *testing.T) {
+	m := keys(results(t), "s", "Z")
+	if m.mode != modeInsert {
+		t.Fatalf("s should enter insert, got %d", m.mode)
+	}
+	wantBuf(t, m, "Zo build ./...")
+}
+
+func TestSubstituteLine(t *testing.T) {
+	m := keys(results(t), "S", "Z")
+	wantBuf(t, m, "Z")
+}
+
+func TestDeleteCharBeforeCursor(t *testing.T) {
+	m := keys(results(t), "l", "l", "X")
+	wantBuf(t, m, "g build ./...")
+	wantCursor(t, m, 1)
+}
+
+func TestDeleteCharBeforeCursorAtStartIsNoop(t *testing.T) {
+	m := keys(results(t), "X")
+	wantBuf(t, m, cmd0)
+}
+
+func TestToggleCase(t *testing.T) {
+	m := keys(results(t), "~")
+	wantBuf(t, m, "Go build ./...")
+	wantCursor(t, m, 1)
+}
+
+func TestToggleCaseCount(t *testing.T) {
+	m := keys(results(t), "3", "~")
+	wantBuf(t, m, "GO build ./...") // space is unaffected
+	wantCursor(t, m, 3)
+}
+
+// ---------------------------------------------------------------------------
 // Visual mode
 // ---------------------------------------------------------------------------
 
@@ -255,6 +418,40 @@ func TestVisualYankReturnsToNormal(t *testing.T) {
 		t.Fatalf("visual y should return to normal, got %d", m.mode)
 	}
 	wantCursor(t, m, 0) // cursor collapses to range start
+}
+
+func TestVisualReplaceFillsSelection(t *testing.T) {
+	m := keys(results(t), "v", "l", "r", "X") // select "go", replace both
+	wantBuf(t, m, "XX build ./...")
+	if m.mode != modeNormal {
+		t.Fatalf("visual r should return to normal, got %d", m.mode)
+	}
+}
+
+func TestVisualReplaceEscStaysVisual(t *testing.T) {
+	m := keys(results(t), "v", "l", "r", "esc")
+	wantBuf(t, m, cmd0)
+	if m.mode != modeVisual {
+		t.Fatalf("cancelled visual r should stay in visual, got %d", m.mode)
+	}
+}
+
+func TestVisualWordEndExtends(t *testing.T) {
+	m := keys(results(t), "v", "e", "d") // select to end of "go"
+	wantBuf(t, m, " build ./...")
+}
+
+func TestVisualFindExtends(t *testing.T) {
+	m := keys(results(t), "v", "f", "b", "d") // select through 'b'
+	wantBuf(t, m, "uild ./...")
+}
+
+func TestVisualToggleCase(t *testing.T) {
+	m := keys(results(t), "v", "l", "~")
+	wantBuf(t, m, "GO build ./...")
+	if m.mode != modeNormal {
+		t.Fatalf("visual ~ should return to normal, got %d", m.mode)
+	}
 }
 
 // ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ import (
 	"memcommands/core"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
@@ -51,6 +52,18 @@ func (m model) visualRange() (int, int) {
 func (m model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
+	// Resolve an armed `r`: overwrite the whole selection with the typed char.
+	if m.rPending {
+		return m.applyVisualReplace(key), nil
+	}
+
+	// Resolve an armed f/F/t/T: extend the selection to the target char.
+	if m.findPending != "" {
+		m.cursor = m.applyFind(key)
+		m.clampCursor()
+		return m, nil
+	}
+
 	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' || (key == "0" && m.count != "") {
 		m.count += key
 		return m, nil
@@ -84,6 +97,30 @@ func (m model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		for n := 0; n < count; n++ {
 			m.cursor = prevWordStart(m.editBuffer, m.cursor)
 		}
+		m.clampCursor()
+	case "e":
+		for n := 0; n < count; n++ {
+			m.cursor = wordEnd(m.editBuffer, m.cursor)
+		}
+		m.clampCursor()
+	case "f", "F", "t", "T":
+		m.findPending = key
+		m.findCount = count
+	case ";":
+		m.cursor = m.repeatFind(m.lastFindCmd, count)
+		m.clampCursor()
+	case ",":
+		m.cursor = m.repeatFind(reverseFind(m.lastFindCmd), count)
+		m.clampCursor()
+	case "r":
+		m.rPending = true
+	case "~":
+		start, end := m.visualRange()
+		for i := start; i < end; i++ {
+			m.editBuffer[i] = toggleCase(m.editBuffer[i])
+		}
+		m.cursor = start
+		m.mode = modeNormal
 		m.clampCursor()
 	case "y":
 		start, end := m.visualRange()
@@ -264,6 +301,18 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.applyOperator(key), nil
 	}
 
+	// Resolve a pending `r`: the next key overwrites the char(s) under the cursor.
+	if m.rPending {
+		return m.applyReplace(key), nil
+	}
+
+	// Resolve a pending f/F/t/T: the next key is the target char to jump to.
+	if m.findPending != "" {
+		m.cursor = m.applyFind(key)
+		m.clampCursor()
+		return m, nil
+	}
+
 	// Resolve a pending `g`: `gg` jumps to the top, or to the count-th line
 	// (1-indexed) when a count was given.
 	if m.gPending {
@@ -346,6 +395,20 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor = prevWordStart(m.editBuffer, m.cursor)
 		}
 		m.clampCursor()
+	case "e":
+		for n := 0; n < count; n++ {
+			m.cursor = wordEnd(m.editBuffer, m.cursor)
+		}
+		m.clampCursor()
+	case "f", "F", "t", "T":
+		m.findPending = key
+		m.findCount = count
+	case ";":
+		m.cursor = m.repeatFind(m.lastFindCmd, count)
+		m.clampCursor()
+	case ",":
+		m.cursor = m.repeatFind(reverseFind(m.lastFindCmd), count)
+		m.clampCursor()
 	case "i":
 		m.mode = modeInsert
 	case "a":
@@ -369,6 +432,45 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.editBuffer = append(m.editBuffer[:m.cursor], m.editBuffer[end:]...)
 			m.clampCursor()
 		}
+	case "X":
+		start := m.cursor - count
+		if start < 0 {
+			start = 0
+		}
+		if m.cursor > 0 {
+			m.editBuffer = append(m.editBuffer[:start], m.editBuffer[m.cursor:]...)
+			m.cursor = start
+			m.clampCursor()
+		}
+	case "D":
+		if m.cursor < len(m.editBuffer) {
+			m.editBuffer = m.editBuffer[:m.cursor]
+			m.clampCursor()
+		}
+	case "C":
+		m.editBuffer = m.editBuffer[:m.cursor]
+		m.mode = modeInsert
+	case "s":
+		end := m.cursor + count
+		if end > len(m.editBuffer) {
+			end = len(m.editBuffer)
+		}
+		if m.cursor < len(m.editBuffer) {
+			m.editBuffer = append(m.editBuffer[:m.cursor], m.editBuffer[end:]...)
+		}
+		m.mode = modeInsert
+	case "S":
+		m.editBuffer = m.editBuffer[:0]
+		m.cursor = 0
+		m.mode = modeInsert
+	case "Y":
+		writeClipboard(string(m.editBuffer))
+	case "~":
+		for n := 0; n < count && m.cursor < len(m.editBuffer); n++ {
+			m.editBuffer[m.cursor] = toggleCase(m.editBuffer[m.cursor])
+			m.cursor++
+		}
+		m.clampCursor()
 	case "m":
 		if m.selectedIndex >= 0 && m.selectedIndex < len(m.commands) {
 			m.aliasTarget = m.commands[m.selectedIndex]
@@ -385,6 +487,9 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.visualAnchor = 0
 		m.cursor = len(m.editBuffer) - 1
 		m.clampCursor()
+	case "r":
+		m.rPending = true
+		m.pendingCount = count
 	case "d", "c", "y":
 		m.pending = key
 		m.pendingCount = count
@@ -450,6 +555,15 @@ func (m model) applyOperator(key string) model {
 		for n := 0; n < count; n++ {
 			end = nextWordStart(m.editBuffer, end)
 		}
+	case "e":
+		end = m.cursor
+		for n := 0; n < count; n++ {
+			end = wordEnd(m.editBuffer, end)
+		}
+		end++ // operators are inclusive of the word-end char
+		if end > len(m.editBuffer) {
+			end = len(m.editBuffer)
+		}
 	case "$":
 		end = len(m.editBuffer)
 	case "0":
@@ -480,6 +594,86 @@ func (m model) applyOperator(key string) model {
 		m.mode = modeInsert
 	}
 	return m
+}
+
+// applyReplace overwrites count chars under the cursor with the typed key, no-op if too few remain or the key isn't printable.
+func (m model) applyReplace(key string) model {
+	count := m.pendingCount
+	if count < 1 {
+		count = 1
+	}
+	m.rPending = false
+	m.pendingCount = 0
+
+	rs := []rune(key)
+	if len(rs) != 1 || m.cursor+count > len(m.editBuffer) {
+		return m
+	}
+	for i := 0; i < count; i++ {
+		m.editBuffer[m.cursor+i] = rs[0]
+	}
+	m.cursor += count - 1
+	m.clampCursor()
+	return m
+}
+
+// applyVisualReplace overwrites the selection with the typed key and returns to normal; a non-printable key cancels.
+func (m model) applyVisualReplace(key string) model {
+	m.rPending = false
+	rs := []rune(key)
+	if len(rs) != 1 {
+		return m
+	}
+	start, end := m.visualRange()
+	for i := start; i < end; i++ {
+		m.editBuffer[i] = rs[0]
+	}
+	m.cursor = start
+	m.mode = modeNormal
+	m.clampCursor()
+	return m
+}
+
+// applyFind resolves an armed f/F/t/T against the typed key, remembers it for ;/,, and returns the destination cursor.
+func (m *model) applyFind(key string) int {
+	cmd := m.findPending
+	count := m.findCount
+	if count < 1 {
+		count = 1
+	}
+	m.findPending = ""
+	m.findCount = 0
+
+	rs := []rune(key)
+	if len(rs) != 1 {
+		return m.cursor
+	}
+	m.lastFindCmd = cmd
+	m.lastFindChar = rs[0]
+	return findDest(m.editBuffer, m.cursor, cmd, rs[0], count)
+}
+
+// repeatFind re-runs the last f/F/t/T (or its reverse for `,`) count times.
+func (m model) repeatFind(cmd string, count int) int {
+	if cmd == "" || m.lastFindCmd == "" {
+		return m.cursor
+	}
+	return findDest(m.editBuffer, m.cursor, cmd, m.lastFindChar, count)
+}
+
+// reverseFind flips a find command's direction for the `,` repeat.
+func reverseFind(cmd string) string {
+	switch cmd {
+	case "f":
+		return "F"
+	case "F":
+		return "f"
+	case "t":
+		return "T"
+	case "T":
+		return "t"
+	}
+	return ""
 }
 
 func (m *model) deleteSelected() {
@@ -586,6 +780,87 @@ func nextWordStart(rs []rune, i int) int {
 		i++
 	}
 	return i
+}
+
+// wordEnd returns the index of the current word's last char, or the next word's when already at a word end.
+func wordEnd(rs []rune, i int) int {
+	n := len(rs)
+	if n == 0 {
+		return 0
+	}
+	if i >= n-1 {
+		return n - 1
+	}
+	i++
+	for i < n && isSpace(rs[i]) {
+		i++
+	}
+	for i+1 < n && !isSpace(rs[i+1]) {
+		i++
+	}
+	if i >= n {
+		i = n - 1
+	}
+	return i
+}
+
+// findDest computes the destination cursor for an f/F/t/T search of target repeated count times, or the original index if not found.
+func findDest(rs []rune, from int, cmd string, target rune, count int) int {
+	switch cmd {
+	case "f":
+		return findForward(rs, from, target, count)
+	case "F":
+		return findBackward(rs, from, target, count)
+	case "t":
+		if dest := findForward(rs, from, target, count); dest > from {
+			return dest - 1
+		}
+	case "T":
+		if dest := findBackward(rs, from, target, count); dest < from {
+			return dest + 1
+		}
+	}
+	return from
+}
+
+func findForward(rs []rune, from int, target rune, count int) int {
+	pos := from
+	for n := 0; n < count; n++ {
+		i := pos + 1
+		for i < len(rs) && rs[i] != target {
+			i++
+		}
+		if i >= len(rs) {
+			return from
+		}
+		pos = i
+	}
+	return pos
+}
+
+func findBackward(rs []rune, from int, target rune, count int) int {
+	pos := from
+	for n := 0; n < count; n++ {
+		i := pos - 1
+		for i >= 0 && rs[i] != target {
+			i--
+		}
+		if i < 0 {
+			return from
+		}
+		pos = i
+	}
+	return pos
+}
+
+func toggleCase(r rune) rune {
+	switch {
+	case unicode.IsUpper(r):
+		return unicode.ToLower(r)
+	case unicode.IsLower(r):
+		return unicode.ToUpper(r)
+	}
+	return r
 }
 
 func prevWordStart(rs []rune, i int) int {
