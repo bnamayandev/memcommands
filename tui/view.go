@@ -61,8 +61,8 @@ func DefaultStyles() *Styles {
 			Background(lipgloss.Color(colSurface0)).
 			Foreground(lipgloss.Color(colText)).
 			Bold(true),
-		cursor:     lipgloss.NewStyle().Reverse(true),
-		cursorBar:  lipgloss.NewStyle().Underline(true),
+		cursor:    lipgloss.NewStyle().Reverse(true),
+		cursorBar: lipgloss.NewStyle().Underline(true),
 		visual: lipgloss.NewStyle().
 			Background(lipgloss.Color(colBlue)).
 			Foreground(lipgloss.Color(colBase)),
@@ -276,8 +276,11 @@ func (m model) renderSelectedRow(i int, query string, editing, aliasing bool, wi
 	switch {
 	case aliasing:
 		prefix = m.aliasEditPrefix()
-	case m.aliasTagText(m.commands[i]) != "":
-		prefix = base.Italic(true).Foreground(lipgloss.Color(colGreen)).Render(m.aliasTagText(m.commands[i])) + base.Render(" ")
+	default:
+		tagBase := base.Italic(true).Foreground(lipgloss.Color(colGreen))
+		if tags := m.renderAliasTags(m.commands[i], tagBase, tagBase.Foreground(lipgloss.Color(colPeach))); tags != "" {
+			prefix = tags + base.Render(" ")
+		}
 	}
 
 	row := base.Render(fmt.Sprintf("❯ %2d ", i+1)) + prefix + content
@@ -295,23 +298,28 @@ func (m model) aliasEditPrefix() string {
 }
 
 func (m model) aliasPrefix(command string) string {
-	tags := m.aliasTagText(command)
+	tags := m.renderAliasTags(command, m.styles.alias, m.styles.alias.Foreground(lipgloss.Color(colPeach)))
 	if tags == "" {
 		return ""
 	}
-	return m.styles.alias.Render(tags) + " "
+	return tags + " "
 }
 
-func (m model) aliasTagText(command string) string {
+// renderAliasTags renders a command's alias labels as [tag] chips, highlighting
+// the characters that match the current query the same way result rows do.
+func (m model) renderAliasTags(command string, base, match lipgloss.Style) string {
 	labels := core.AliasesForCommand(command, m.aliases)
 	if len(labels) == 0 {
 		return ""
 	}
+
+	query := m.userInput.Value()
 	tags := make([]string, len(labels))
 	for i, label := range labels {
-		tags[i] = "[" + label + "]"
+		inner := highlightMatch(label, core.MatchPositions(query, label), base, match)
+		tags[i] = base.Render("[") + inner + base.Render("]")
 	}
-	return strings.Join(tags, " ")
+	return strings.Join(tags, base.Render(" "))
 }
 
 func highlightMatch(text string, positions []int, base, match lipgloss.Style) string {
