@@ -5,7 +5,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$HOME/.local/bin"
 MARKER="# >>> memcommands (Ctrl-R) >>>"
-END_MARKER="# <<< memcommands (Ctrl-R) <<<"
 
 # Detect the operating system.
 case "$(uname -s)" in
@@ -25,12 +24,28 @@ mkdir -p "$INSTALL_DIR"
 ln -sf "$SCRIPT_DIR/bin/memcommands" "$INSTALL_DIR/memcommands"
 echo "Linked $INSTALL_DIR/memcommands -> $SCRIPT_DIR/bin/memcommands"
 
-# Pick the shell, its rc file, and the Ctrl-R snippet to install.
+# Pick the shell and its rc file (macOS bash uses ~/.bash_profile for login shells).
 SHELL_NAME="$(basename "${SHELL:-}")"
 case "$SHELL_NAME" in
+  zsh)  RC="$HOME/.zshrc" ;;
+  bash) if [ "$OS" = "mac" ]; then RC="$HOME/.bash_profile"; else RC="$HOME/.bashrc"; fi ;;
+  fish) RC="$HOME/.config/fish/config.fish"; mkdir -p "$(dirname "$RC")" ;;
+  *) echo "Unrecognized shell '${SHELL_NAME:-unknown}'. Binary is installed; add a Ctrl-R binding manually." >&2; exit 0 ;;
+esac
+
+touch "$RC"
+
+# Append the Ctrl-R snippet once; re-runs are no-ops.
+if grep -qF "$MARKER" "$RC"; then
+  echo "Ctrl-R binding already present in $RC"
+  echo "Done. Open a new $SHELL_NAME session (or run: source \"$RC\") and press Ctrl-R."
+  exit 0
+fi
+
+case "$SHELL_NAME" in
   zsh)
-    RC="$HOME/.zshrc"
-    BLOCK=$(cat <<'EOF'
+    cat >> "$RC" <<'EOF'
+
 # >>> memcommands (Ctrl-R) >>>
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
 memcommands-widget() { memcommands </dev/tty; zle reset-prompt }
@@ -38,23 +53,19 @@ zle -N memcommands-widget
 bindkey '^R' memcommands-widget
 # <<< memcommands (Ctrl-R) <<<
 EOF
-)
     ;;
   bash)
-    # macOS reads ~/.bash_profile for login shells; Linux uses ~/.bashrc.
-    if [ "$OS" = "mac" ]; then RC="$HOME/.bash_profile"; else RC="$HOME/.bashrc"; fi
-    BLOCK=$(cat <<'EOF'
+    cat >> "$RC" <<'EOF'
+
 # >>> memcommands (Ctrl-R) >>>
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
 bind -x '"\C-r": memcommands'
 # <<< memcommands (Ctrl-R) <<<
 EOF
-)
     ;;
   fish)
-    RC="$HOME/.config/fish/config.fish"
-    mkdir -p "$(dirname "$RC")"
-    BLOCK=$(cat <<'EOF'
+    cat >> "$RC" <<'EOF'
+
 # >>> memcommands (Ctrl-R) >>>
 if not contains $HOME/.local/bin $PATH
     set -gx PATH $HOME/.local/bin $PATH
@@ -66,21 +77,8 @@ end
 bind \cr memcommands-widget
 # <<< memcommands (Ctrl-R) <<<
 EOF
-)
-    ;;
-  *)
-    echo "Unrecognized shell '${SHELL_NAME:-unknown}'. Binary is installed; add a Ctrl-R binding manually." >&2
-    exit 0
     ;;
 esac
 
-# Append the snippet once; re-runs are no-ops.
-touch "$RC"
-if grep -qF "$MARKER" "$RC"; then
-  echo "Ctrl-R binding already present in $RC"
-else
-  printf '\n%s\n' "$BLOCK" >> "$RC"
-  echo "Added Ctrl-R binding to $RC"
-fi
-
+echo "Added Ctrl-R binding to $RC"
 echo "Done. Open a new $SHELL_NAME session (or run: source \"$RC\") and press Ctrl-R."
