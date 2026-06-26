@@ -48,7 +48,7 @@ case "$SHELL_NAME" in
 
 # >>> memcommands (Ctrl-R) >>>
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
-memcommands-widget() { memcommands </dev/tty; zle reset-prompt }
+memcommands-widget() { fc -W; memcommands </dev/tty; zle reset-prompt }
 zle -N memcommands-widget
 bindkey '^R' memcommands-widget
 # <<< memcommands (Ctrl-R) <<<
@@ -59,7 +59,8 @@ EOF
 
 # >>> memcommands (Ctrl-R) >>>
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
-bind -x '"\C-r": memcommands'
+memcommands-widget() { history -a; memcommands; }
+bind -x '"\C-r": memcommands-widget'
 # <<< memcommands (Ctrl-R) <<<
 EOF
     ;;
