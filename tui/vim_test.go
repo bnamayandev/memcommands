@@ -21,6 +21,15 @@ func results(t *testing.T) model {
 	return keys(newModel(t), "ctrl+j")
 }
 
+// bufModel enters results normal mode with a custom edit buffer and cursor, for
+// exercising motions/objects against buffers the fixture commands don't contain.
+func bufModel(t *testing.T, s string, cursor int) model {
+	m := results(t)
+	m.editBuffer = []rune(s)
+	m.cursor = cursor
+	return m
+}
+
 func wantBuf(t *testing.T, m model, want string) {
 	t.Helper()
 	if string(m.editBuffer) != want {
@@ -368,6 +377,187 @@ func TestFindEscCancels(t *testing.T) {
 	if m.findPending != "" {
 		t.Fatalf("pending find should clear after esc")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Operator + find/till (df, dt, dF, ; , under operator) and count after operator
+// ---------------------------------------------------------------------------
+
+func TestDeleteFindChar(t *testing.T) {
+	m := keys(results(t), "d", "f", "b") // delete through 'b'
+	wantBuf(t, m, "uild ./...")
+}
+
+func TestDeleteTillChar(t *testing.T) {
+	m := keys(results(t), "d", "t", "b") // delete up to (not incl.) 'b'
+	wantBuf(t, m, "build ./...")
+}
+
+func TestChangeTillCharEntersInsert(t *testing.T) {
+	m := keys(results(t), "c", "t", "b")
+	if m.mode != modeInsert {
+		t.Fatalf("ct should enter insert, got %d", m.mode)
+	}
+	wantBuf(t, m, "build ./...")
+}
+
+func TestDeleteFindBackward(t *testing.T) {
+	m := keys(results(t), "$", "d", "F", ".") // from end, delete back through last '.'
+	wantBuf(t, m, "go build ./..")
+}
+
+func TestDeleteFindNotFoundIsNoop(t *testing.T) {
+	m := keys(results(t), "d", "f", "z")
+	wantBuf(t, m, cmd0)
+	if m.pending != "" || m.pendingFind != "" {
+		t.Fatalf("a failed operator-find should clear pending state")
+	}
+}
+
+func TestCountAfterOperator(t *testing.T) {
+	m := keys(results(t), "d", "2", "w") // d2w == 2dw
+	wantBuf(t, m, "./...")
+}
+
+// ---------------------------------------------------------------------------
+// W / B / E (WORD motions) and ^ first-non-blank
+// ---------------------------------------------------------------------------
+
+func TestWORDMotionsMirrorWord(t *testing.T) {
+	m := keys(results(t), "W", "W")
+	wantCursor(t, m, 9) // same word starts as w
+	m = keys(m, "B")
+	wantCursor(t, m, 3)
+	m = keys(results(t), "E")
+	wantCursor(t, m, 1) // end of "go"
+}
+
+func TestCaretFirstNonBlank(t *testing.T) {
+	m := bufModel(t, "  go", 3)
+	m = keys(m, "^")
+	wantCursor(t, m, 2)
+}
+
+func TestDeleteToFirstNonBlank(t *testing.T) {
+	m := bufModel(t, "  go", 3) // cursor on 'o'
+	m = keys(m, "d", "^")       // delete from first non-blank up to cursor
+	wantBuf(t, m, "  o")
+}
+
+// ---------------------------------------------------------------------------
+// Text objects: di / da / ci / yi with words, quotes, brackets
+// ---------------------------------------------------------------------------
+
+func TestDeleteInnerWord(t *testing.T) {
+	m := bufModel(t, "go build ./...", 4) // cursor on 'u' of build
+	m = keys(m, "d", "i", "w")
+	wantBuf(t, m, "go  ./...")
+}
+
+func TestDeleteAroundWord(t *testing.T) {
+	m := bufModel(t, "go build ./...", 4)
+	m = keys(m, "d", "a", "w") // word plus trailing space
+	wantBuf(t, m, "go ./...")
+}
+
+func TestChangeInnerWordEntersInsert(t *testing.T) {
+	m := bufModel(t, "go build ./...", 4)
+	m = keys(m, "c", "i", "w", "X")
+	if m.mode != modeInsert {
+		t.Fatalf("ciw should enter insert, got %d", m.mode)
+	}
+	wantBuf(t, m, "go X ./...")
+}
+
+func TestDeleteInnerQuotes(t *testing.T) {
+	m := bufModel(t, `echo "hi there" x`, 8) // inside the quotes
+	m = keys(m, "d", "i", `"`)
+	wantBuf(t, m, `echo "" x`)
+}
+
+func TestDeleteAroundQuotes(t *testing.T) {
+	m := bufModel(t, `echo "hi there" x`, 8)
+	m = keys(m, "d", "a", `"`) // includes the quotes
+	wantBuf(t, m, "echo  x")
+}
+
+func TestDeleteInnerSingleQuotes(t *testing.T) {
+	m := bufModel(t, "git commit -m 'wip'", 16)
+	m = keys(m, "d", "i", "'")
+	wantBuf(t, m, "git commit -m ''")
+}
+
+func TestDeleteInnerParens(t *testing.T) {
+	m := bufModel(t, "func(a, b)", 6) // inside the parens
+	m = keys(m, "d", "i", "(")
+	wantBuf(t, m, "func()")
+}
+
+func TestDeleteAroundParens(t *testing.T) {
+	m := bufModel(t, "func(a, b)", 6)
+	m = keys(m, "d", "a", "(")
+	wantBuf(t, m, "func")
+}
+
+func TestParenObjectViaBAlias(t *testing.T) {
+	m := bufModel(t, "func(a, b)", 6)
+	m = keys(m, "c", "i", "b") // `b` is an alias for the () object
+	if m.mode != modeInsert {
+		t.Fatalf("cib should enter insert, got %d", m.mode)
+	}
+	wantBuf(t, m, "func()")
+}
+
+func TestDeleteInnerNestedBraces(t *testing.T) {
+	m := bufModel(t, "a{b{c}d}e", 4) // cursor inside inner braces, on 'c'
+	m = keys(m, "d", "i", "{")
+	wantBuf(t, m, "a{b{}d}e")
+}
+
+func TestDeleteInnerBrackets(t *testing.T) {
+	m := bufModel(t, "arr[idx]", 5)
+	m = keys(m, "d", "i", "[")
+	wantBuf(t, m, "arr[]")
+}
+
+func TestYankInnerWordLeavesBuffer(t *testing.T) {
+	m := bufModel(t, "go build ./...", 4)
+	m = keys(m, "y", "i", "w")
+	wantBuf(t, m, "go build ./...")
+	if m.mode != modeNormal {
+		t.Fatalf("yiw should stay in normal mode, got %d", m.mode)
+	}
+}
+
+func TestTextObjectNoMatchIsNoop(t *testing.T) {
+	m := bufModel(t, "no quotes here", 3)
+	m = keys(m, "d", "i", `"`)
+	wantBuf(t, m, "no quotes here")
+	if m.pending != "" || m.pendingObj != "" {
+		t.Fatalf("an unmatched object should clear pending state")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Visual-mode text objects
+// ---------------------------------------------------------------------------
+
+func TestVisualInnerWord(t *testing.T) {
+	m := bufModel(t, "go build ./...", 4)
+	m = keys(m, "v", "i", "w", "d")
+	wantBuf(t, m, "go  ./...")
+}
+
+func TestVisualInnerQuotesDelete(t *testing.T) {
+	m := bufModel(t, `say "hello"`, 6)
+	m = keys(m, "v", "i", `"`, "d")
+	wantBuf(t, m, `say ""`)
+}
+
+func TestVisualAroundParens(t *testing.T) {
+	m := bufModel(t, "f(x)", 2)
+	m = keys(m, "v", "a", "(", "d")
+	wantBuf(t, m, "f")
 }
 
 // ---------------------------------------------------------------------------

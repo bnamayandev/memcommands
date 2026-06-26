@@ -57,6 +57,11 @@ func (m model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.applyVisualReplace(key), nil
 	}
 
+	// Resolve an armed text object: set the selection to its span.
+	if m.objPending != "" {
+		return m.applyVisualObject(key), nil
+	}
+
 	// Resolve an armed f/F/t/T: extend the selection to the target char.
 	if m.findPending != "" {
 		m.cursor = m.applyFind(key)
@@ -85,24 +90,30 @@ func (m model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.clampCursor()
 	case "0":
 		m.cursor = 0
+	case "^":
+		m.cursor = firstNonBlank(m.editBuffer)
+		m.clampCursor()
 	case "$":
 		m.cursor = len(m.editBuffer) - 1
 		m.clampCursor()
-	case "w":
+	case "w", "W":
 		for n := 0; n < count; n++ {
 			m.cursor = nextWordStart(m.editBuffer, m.cursor)
 		}
 		m.clampCursor()
-	case "b":
+	case "b", "B":
 		for n := 0; n < count; n++ {
 			m.cursor = prevWordStart(m.editBuffer, m.cursor)
 		}
 		m.clampCursor()
-	case "e":
+	case "e", "E":
 		for n := 0; n < count; n++ {
 			m.cursor = wordEnd(m.editBuffer, m.cursor)
 		}
 		m.clampCursor()
+	case "i", "a":
+		m.objPending = key
+		m.pendingCount = count
 	case "f", "F", "t", "T":
 		m.findPending = key
 		m.findCount = count
@@ -169,6 +180,12 @@ func (m model) updateAlias(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m model) updateAliasNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
+	if m.pendingObj != "" {
+		return m.applyOperatorObject(key), nil
+	}
+	if m.pendingFind != "" {
+		return m.applyOperatorFind(key), nil
+	}
 	if m.pending != "" {
 		return m.applyOperator(key), nil
 	}
@@ -377,6 +394,13 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 	m.statusMsg = "" // any normal-mode key clears a transient message
 
+	// An operator armed with i/a or f/F/t/T consumes the next key as its target.
+	if m.pendingObj != "" {
+		return m.applyOperatorObject(key), nil
+	}
+	if m.pendingFind != "" {
+		return m.applyOperatorFind(key), nil
+	}
 	if m.pending != "" {
 		return m.applyOperator(key), nil
 	}
@@ -483,20 +507,23 @@ func (m *model) editMotion(key string, count int) {
 		m.clampCursor()
 	case "0":
 		m.cursor = 0
+	case "^":
+		m.cursor = firstNonBlank(m.editBuffer)
+		m.clampCursor()
 	case "$":
 		m.cursor = len(m.editBuffer) - 1
 		m.clampCursor()
-	case "w":
+	case "w", "W":
 		for n := 0; n < count; n++ {
 			m.cursor = nextWordStart(m.editBuffer, m.cursor)
 		}
 		m.clampCursor()
-	case "b":
+	case "b", "B":
 		for n := 0; n < count; n++ {
 			m.cursor = prevWordStart(m.editBuffer, m.cursor)
 		}
 		m.clampCursor()
-	case "e":
+	case "e", "E":
 		for n := 0; n < count; n++ {
 			m.cursor = wordEnd(m.editBuffer, m.cursor)
 		}
@@ -619,59 +646,143 @@ func (m *model) takeCount() int {
 
 func (m model) applyOperator(key string) model {
 	op := m.pending
+
+	// A digit typed after the operator builds the motion count, e.g. `d2w`.
+	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' || (key == "0" && m.count != "") {
+		m.count += key
+		return m
+	}
+
+	// Combine the pre-operator count with any post-operator count: `2d3w` = 6.
 	count := m.pendingCount
 	if count < 1 {
 		count = 1
 	}
+	if m.count != "" {
+		if v, err := strconv.Atoi(m.count); err == nil && v > 0 {
+			count *= v
+		}
+		m.count = ""
+	}
+	m.pendingCount = count // kept for the second key of a find/object operator
+
+	// Doubled operator (dd/cc/yy) acts on the whole line.
+	if key == op {
+		m.pending = ""
+		m.pendingCount = 0
+		if op == "d" {
+			if m.aliasing {
+				// `dd` on the single-line alias buffer clears it, like vim.
+				m.editBuffer = m.editBuffer[:0]
+				m.cursor = 0
+				return m
+			}
+			m.deleteSelected()
+			return m
+		}
+		return m.applyOpRange(op, 0, len(m.editBuffer))
+	}
+
+	// Two-key motions keep the operator pending until their target arrives.
+	switch key {
+	case "f", "F", "t", "T":
+		m.pendingFind = key
+		return m
+	case "i", "a":
+		m.pendingObj = key
+		return m
+	case ";", ",":
+		cmd := m.lastFindCmd
+		if key == "," {
+			cmd = reverseFind(cmd)
+		}
+		m.pending = ""
+		m.pendingCount = 0
+		if start, end, ok := m.opFindSpan(cmd, m.lastFindChar, count); ok && m.lastFindCmd != "" {
+			return m.applyOpRange(op, start, end)
+		}
+		return m
+	}
+
+	m.pending = ""
+	m.pendingCount = 0
+	if start, end, ok := m.motionSpan(key, count); ok {
+		return m.applyOpRange(op, start, end)
+	}
+	return m
+}
+
+// applyOperatorFind resolves an operator armed with f/F/t/T against its target.
+func (m model) applyOperatorFind(key string) model {
+	cmd := m.pendingFind
+	op := m.pending
+	count := m.pendingCount
+	if count < 1 {
+		count = 1
+	}
+	m.pendingFind = ""
 	m.pending = ""
 	m.pendingCount = 0
 
-	if op == "d" && key == "d" {
-		if m.aliasing {
-			// `dd` on the single-line alias buffer clears it, like vim.
-			m.editBuffer = m.editBuffer[:0]
-			m.cursor = 0
-			return m
-		}
-		m.deleteSelected()
+	rs := []rune(key)
+	if len(rs) != 1 {
 		return m
 	}
-
-	start, end := m.cursor, m.cursor
-	switch key {
-	case op:
-		start, end = 0, len(m.editBuffer)
-	case "w":
-		end = m.cursor
-		for n := 0; n < count; n++ {
-			end = nextWordStart(m.editBuffer, end)
-		}
-	case "e":
-		end = m.cursor
-		for n := 0; n < count; n++ {
-			end = wordEnd(m.editBuffer, end)
-		}
-		end++ // operators are inclusive of the word-end char
-		if end > len(m.editBuffer) {
-			end = len(m.editBuffer)
-		}
-	case "$":
-		end = len(m.editBuffer)
-	case "0":
-		start = 0
-	case "b":
-		start = m.cursor
-		for n := 0; n < count; n++ {
-			start = prevWordStart(m.editBuffer, start)
-		}
-	default:
-		return m
+	m.lastFindCmd = cmd
+	m.lastFindChar = rs[0]
+	if start, end, ok := m.opFindSpan(cmd, rs[0], count); ok {
+		return m.applyOpRange(op, start, end)
 	}
+	return m
+}
 
+// applyOperatorObject resolves an operator armed with i/a against its object char.
+func (m model) applyOperatorObject(key string) model {
+	obj := m.pendingObj
+	op := m.pending
+	count := m.pendingCount
+	if count < 1 {
+		count = 1
+	}
+	m.pendingObj = ""
+	m.pending = ""
+	m.pendingCount = 0
+
+	if start, end, ok := m.objectSpan(obj, key, count); ok {
+		return m.applyOpRange(op, start, end)
+	}
+	return m
+}
+
+// applyVisualObject sets the selection to the resolved text object's span.
+func (m model) applyVisualObject(key string) model {
+	obj := m.objPending
+	count := m.pendingCount
+	if count < 1 {
+		count = 1
+	}
+	m.objPending = ""
+	m.pendingCount = 0
+
+	if start, end, ok := m.objectSpan(obj, key, count); ok {
+		m.visualAnchor = start
+		m.cursor = end - 1
+		m.clampCursor()
+	}
+	return m
+}
+
+// applyOpRange applies the pending operator over the half-open [start, end) span.
+func (m model) applyOpRange(op string, start, end int) model {
 	if start > end {
 		start, end = end, start
 	}
-
+	if start < 0 {
+		start = 0
+	}
+	if end > len(m.editBuffer) {
+		end = len(m.editBuffer)
+	}
 	switch op {
 	case "y":
 		writeClipboard(string(m.editBuffer[start:end]))
@@ -685,6 +796,71 @@ func (m model) applyOperator(key string) model {
 		m.mode = modeInsert
 	}
 	return m
+}
+
+// motionSpan resolves a single-key motion to the half-open [start, end) buffer
+// span it covers from the cursor; inclusive motions advance end past their last
+// rune. ok is false for keys that aren't motions.
+func (m model) motionSpan(key string, count int) (start, end int, ok bool) {
+	c := m.cursor
+	switch key {
+	case "h", "left":
+		s := c - count
+		if s < 0 {
+			s = 0
+		}
+		return s, c, true
+	case "l", "right", " ":
+		e := c + count
+		if e > len(m.editBuffer) {
+			e = len(m.editBuffer)
+		}
+		return c, e, true
+	case "0":
+		return 0, c, true
+	case "^":
+		return firstNonBlank(m.editBuffer), c, true
+	case "$":
+		return c, len(m.editBuffer), true
+	case "w", "W":
+		e := c
+		for n := 0; n < count; n++ {
+			e = nextWordStart(m.editBuffer, e)
+		}
+		return c, e, true
+	case "e", "E":
+		e := c
+		for n := 0; n < count; n++ {
+			e = wordEnd(m.editBuffer, e)
+		}
+		e++ // operators are inclusive of the word-end char
+		if e > len(m.editBuffer) {
+			e = len(m.editBuffer)
+		}
+		return c, e, true
+	case "b", "B":
+		s := c
+		for n := 0; n < count; n++ {
+			s = prevWordStart(m.editBuffer, s)
+		}
+		return s, c, true
+	}
+	return 0, 0, false
+}
+
+// opFindSpan resolves an f/F/t/T target into the span an operator should cover.
+func (m model) opFindSpan(cmd string, target rune, count int) (start, end int, ok bool) {
+	dest := findDest(m.editBuffer, m.cursor, cmd, target, count)
+	if dest == m.cursor {
+		return 0, 0, false
+	}
+	switch cmd {
+	case "f", "t":
+		return m.cursor, dest + 1, true // forward motions are inclusive
+	case "F", "T":
+		return dest, m.cursor, true
+	}
+	return 0, 0, false
 }
 
 // applyReplace overwrites count chars under the cursor with the typed key, no-op if too few remain or the key isn't printable.
@@ -952,6 +1128,170 @@ func toggleCase(r rune) rune {
 		return unicode.ToUpper(r)
 	}
 	return r
+}
+
+// firstNonBlank returns the index of the first non-space rune, or 0 if blank.
+func firstNonBlank(rs []rune) int {
+	i := 0
+	for i < len(rs) && isSpace(rs[i]) {
+		i++
+	}
+	if i >= len(rs) {
+		return max(0, len(rs)-1)
+	}
+	return i
+}
+
+// objectSpan resolves a text object (kind "i"/"a", obj the delimiter key) into
+// the half-open [start, end) span it covers; ok is false for unknown objects.
+func (m model) objectSpan(kind, obj string, count int) (start, end int, ok bool) {
+	around := kind == "a"
+	switch obj {
+	case "w", "W":
+		return wordObjectSpan(m.editBuffer, m.cursor, around, count)
+	case "\"", "'", "`":
+		return quoteObjectSpan(m.editBuffer, m.cursor, []rune(obj)[0], around)
+	case "(", ")", "b":
+		return pairObjectSpan(m.editBuffer, m.cursor, '(', ')', around)
+	case "{", "}", "B":
+		return pairObjectSpan(m.editBuffer, m.cursor, '{', '}', around)
+	case "[", "]":
+		return pairObjectSpan(m.editBuffer, m.cursor, '[', ']', around)
+	case "<", ">":
+		return pairObjectSpan(m.editBuffer, m.cursor, '<', '>', around)
+	}
+	return 0, 0, false
+}
+
+// wordObjectSpan returns the run of (non-)space runes under the cursor; around
+// also swallows trailing whitespace, or leading when none trails.
+func wordObjectSpan(rs []rune, cur int, around bool, count int) (int, int, bool) {
+	n := len(rs)
+	if n == 0 {
+		return 0, 0, false
+	}
+	if cur >= n {
+		cur = n - 1
+	}
+	onSpace := isSpace(rs[cur])
+	start := cur
+	for start > 0 && isSpace(rs[start-1]) == onSpace {
+		start--
+	}
+	end := cur + 1
+	for end < n && isSpace(rs[end]) == onSpace {
+		end++
+	}
+	for k := 1; k < count && end < n; k++ {
+		blockSpace := isSpace(rs[end])
+		for end < n && isSpace(rs[end]) == blockSpace {
+			end++
+		}
+	}
+	if around {
+		ate := false
+		for end < n && isSpace(rs[end]) {
+			end++
+			ate = true
+		}
+		if !ate {
+			for start > 0 && isSpace(rs[start-1]) {
+				start--
+			}
+		}
+	}
+	return start, end, true
+}
+
+// quoteObjectSpan finds the quote pair containing the cursor (or the next one
+// ahead); inner excludes the quotes, around includes them.
+func quoteObjectSpan(rs []rune, cur int, q rune, around bool) (int, int, bool) {
+	n := len(rs)
+	fallbackOpen, fallbackClose := -1, -1
+	for i := 0; i < n; {
+		if rs[i] != q {
+			i++
+			continue
+		}
+		j := i + 1
+		for j < n && rs[j] != q {
+			j++
+		}
+		if j >= n {
+			break // unbalanced trailing quote
+		}
+		if cur >= i && cur <= j {
+			if around {
+				return i, j + 1, true
+			}
+			return i + 1, j, true
+		}
+		if fallbackOpen < 0 && i >= cur {
+			fallbackOpen, fallbackClose = i, j
+		}
+		i = j + 1
+	}
+	if fallbackOpen >= 0 {
+		if around {
+			return fallbackOpen, fallbackClose + 1, true
+		}
+		return fallbackOpen + 1, fallbackClose, true
+	}
+	return 0, 0, false
+}
+
+// pairObjectSpan finds the innermost open/close bracket pair enclosing the
+// cursor, honoring nesting; inner excludes the brackets, around includes them.
+func pairObjectSpan(rs []rune, cur int, open, closer rune, around bool) (int, int, bool) {
+	n := len(rs)
+	if n == 0 {
+		return 0, 0, false
+	}
+	if cur >= n {
+		cur = n - 1
+	}
+	o, depth := -1, 0
+	for i := cur; i >= 0; i-- {
+		switch {
+		case rs[i] == closer && i != cur:
+			depth++
+		case rs[i] == open:
+			if depth == 0 {
+				o = i
+			} else {
+				depth--
+			}
+		}
+		if o >= 0 {
+			break
+		}
+	}
+	if o < 0 {
+		return 0, 0, false
+	}
+	c, depth := -1, 0
+	for i := o + 1; i < n; i++ {
+		switch {
+		case rs[i] == open:
+			depth++
+		case rs[i] == closer:
+			if depth == 0 {
+				c = i
+			} else {
+				depth--
+			}
+		}
+		if c >= 0 {
+			break
+		}
+	}
+	if c < 0 {
+		return 0, 0, false
+	}
+	if around {
+		return o, c + 1, true
+	}
+	return o + 1, c, true
 }
 
 func prevWordStart(rs []rune, i int) int {

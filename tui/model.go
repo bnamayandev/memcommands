@@ -47,6 +47,11 @@ type model struct {
 	pendingCount int
 	count        string
 	gPending     bool
+	// pendingFind arms an operator awaiting an f/F/t/T target, e.g. `dt,`.
+	pendingFind string
+	// pendingObj / objPending arm a text-object char for an operator / visual select.
+	pendingObj string
+	objPending string
 	// rPending arms `r`: the next key replaces the char(s) under the cursor.
 	rPending bool
 	// findPending holds an armed f/F/t/T awaiting its target; findCount is its count; lastFindCmd/lastFindChar back ;/, repeats.
@@ -228,6 +233,9 @@ func (m *model) enterResults() {
 	m.gPending = false
 	m.rPending = false
 	m.findPending = ""
+	m.pendingFind = ""
+	m.pendingObj = ""
+	m.objPending = ""
 	m.userInput.Blur()
 
 	if m.selectedIndex >= len(m.commands) {
@@ -262,6 +270,9 @@ func (m *model) leaveResults() {
 	m.gPending = false
 	m.rPending = false
 	m.findPending = ""
+	m.pendingFind = ""
+	m.pendingObj = ""
+	m.objPending = ""
 	m.userInput.Focus()
 }
 
