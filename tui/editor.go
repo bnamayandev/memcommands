@@ -77,10 +77,10 @@ func (m model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.clampCursor()
 	case "enter":
 		return m.run(string(m.editBuffer))
-	case "h":
+	case "h", "left":
 		m.cursor -= count
 		m.clampCursor()
-	case "l":
+	case "l", "right":
 		m.cursor += count
 		m.clampCursor()
 	case "0":
@@ -357,9 +357,9 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.setSelection(target)
 	case "enter":
 		return m.run(string(m.editBuffer))
-	case "j", "ctrl+j", "ctrl+n":
+	case "j", "ctrl+j", "ctrl+n", "down":
 		m.setSelection(m.selectedIndex + count)
-	case "k", "ctrl+k", "ctrl+p":
+	case "k", "ctrl+k", "ctrl+p", "up":
 		// Moving up past the first row returns to the search bar.
 		if m.selectedIndex == 0 {
 			m.leaveResults()
@@ -374,10 +374,10 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.setSelection(m.selectedIndex - maxResults)
-	case "h":
+	case "h", "left":
 		m.cursor -= count
 		m.clampCursor()
-	case "l":
+	case "l", "right":
 		m.cursor += count
 		m.clampCursor()
 	case "0":

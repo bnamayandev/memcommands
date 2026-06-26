@@ -169,7 +169,7 @@ func (m model) helpView(width int) string {
 
 	sections := []section{
 		{"Navigate", []binding{
-			{"j / k", "move down / up"},
+			{"j / k", "move down / up (or ↓ / ↑)"},
 			{"ctrl+d / ctrl+u", "half page down / up"},
 			{"gg / G", "jump to top / bottom"},
 			{"{n}G", "jump to line n"},
@@ -177,7 +177,7 @@ func (m model) helpView(width int) string {
 		{"Edit command", []binding{
 			{"i / a", "insert before / after cursor"},
 			{"I / A", "insert at start / end"},
-			{"h / l", "move cursor left / right"},
+			{"h / l", "move cursor left / right (or ← / →)"},
 			{"0 / $", "cursor to start / end"},
 			{"w / b / e", "next / prev / end of word"},
 			{"f / t + char", "find / till char (; , repeat)"},

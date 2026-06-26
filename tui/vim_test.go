@@ -79,6 +79,50 @@ func TestCountResetsAfterMotion(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Arrow keys mirror hjkl (normal/visual) and drop into results from search
+// ---------------------------------------------------------------------------
+
+func TestArrowsMoveCursorInNormal(t *testing.T) {
+	m := keys(results(t), "right", "right", "right")
+	wantCursor(t, m, 3)
+	m = keys(m, "left")
+	wantCursor(t, m, 2)
+	// Counts apply just like l/h.
+	m = keys(m, "2", "right")
+	wantCursor(t, m, 4)
+}
+
+func TestArrowsNavigateList(t *testing.T) {
+	m := keys(results(t), "down")
+	if m.selectedIndex != 1 {
+		t.Fatalf("down -> index %d, want 1", m.selectedIndex)
+	}
+	m = keys(m, "up")
+	if m.selectedIndex != 0 {
+		t.Fatalf("up -> index %d, want 0", m.selectedIndex)
+	}
+}
+
+func TestUpArrowAtFirstRowReturnsToSearch(t *testing.T) {
+	m := keys(results(t), "up")
+	if m.focus != focusSearch {
+		t.Fatalf("up on row 1 should return to search, got focus %v", m.focus)
+	}
+}
+
+func TestDownArrowFromSearchEntersResults(t *testing.T) {
+	m := keys(newModel(t), "down")
+	if m.focus != focusResults || m.mode != modeNormal {
+		t.Fatalf("down from search should enter results, got focus=%d mode=%d", m.focus, m.mode)
+	}
+}
+
+func TestArrowsExtendVisualSelection(t *testing.T) {
+	m := keys(results(t), "v", "right", "d") // select "go"
+	wantBuf(t, m, " build ./...")
+}
+
+// ---------------------------------------------------------------------------
 // List navigation
 // ---------------------------------------------------------------------------
 

@@ -27,6 +27,14 @@ func keys(m model, ss ...string) model {
 			msg = tea.KeyMsg{Type: tea.KeySpace}
 		case "backspace":
 			msg = tea.KeyMsg{Type: tea.KeyBackspace}
+		case "up":
+			msg = tea.KeyMsg{Type: tea.KeyUp}
+		case "down":
+			msg = tea.KeyMsg{Type: tea.KeyDown}
+		case "left":
+			msg = tea.KeyMsg{Type: tea.KeyLeft}
+		case "right":
+			msg = tea.KeyMsg{Type: tea.KeyRight}
 		default:
 			msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 		}

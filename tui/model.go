@@ -213,7 +213,7 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.requestQuit()
 	case "enter":
 		return m.run(m.firstCommand())
-	case "ctrl+j", "ctrl+n", "ctrl+k", "ctrl+p":
+	case "ctrl+j", "ctrl+n", "ctrl+k", "ctrl+p", "down", "up":
 		if len(m.commands) == 0 {
 			return m, nil
 		}

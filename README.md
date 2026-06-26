@@ -55,7 +55,7 @@ Launch it and you land in the **search** box. Type to filter your history.
 | --- | --- |
 | _type_ | Fuzzy-filter the history |
 | `Enter` | Run the top match |
-| `Ctrl-j` / `Ctrl-n` / `Ctrl-k` / `Ctrl-p` | Drop into the results list |
+| `↓` / `↑` / `Ctrl-j` / `Ctrl-n` / `Ctrl-k` / `Ctrl-p` | Drop into the results list |
 | `Ctrl-a` | Toggle the aliased-only view |
 | `Ctrl-c` | Quit |
 
@@ -65,9 +65,9 @@ Once you're in the list, you're in Vim **normal mode** on the selected command.
 
 | Key | Action |
 | --- | --- |
-| `j` / `k` | Move selection down / up (counts work, e.g. `5j`) |
+| `j` / `k` / `↓` / `↑` | Move selection down / up (counts work, e.g. `5j`) |
 | `Ctrl-d` / `Ctrl-u` | Page down / up |
-| `h` / `l` | Move the cursor left / right |
+| `h` / `l` / `←` / `→` | Move the cursor left / right |
 | `0` / `$` | Jump to start / end of line |
 | `w` / `b` | Next / previous word |
 | `i` / `a` / `I` / `A` | Enter insert mode (before/after cursor, line start/end) |
@@ -88,7 +88,7 @@ with the usual motions:
 
 | Key | Action |
 | --- | --- |
-| `h` / `l` / `0` / `$` / `w` / `b` | Extend the selection |
+| `h` / `l` / `←` / `→` / `0` / `$` / `w` / `b` | Extend the selection |
 | `y` | Yank the selection to the clipboard |
 | `d` / `x` | Delete the selection |
 | `c` | Delete the selection and drop into insert mode |
@@ -96,7 +96,8 @@ with the usual motions:
 
 ### ⌨️ Insert mode
 
-Type normally. `Esc` returns to normal mode, `Enter` runs the command.
+Type normally. `←` / `→` move the cursor, `Esc` returns to normal mode, and
+`Enter` runs the command.
 
 ## ⚙️ How it works
 
