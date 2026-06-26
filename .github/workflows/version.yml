@@ -1,0 +1,54 @@
+name: Version
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # need full history + tags
+
+      - name: Compute next version
+        id: bump
+        run: |
+          set -euo pipefail
+
+          latest="$(git describe --tags --abbrev=0 2>/dev/null || echo v0.0.0)"
+          IFS='.' read -r major minor patch <<< "${latest#v}"
+
+          if git rev-parse "$latest" >/dev/null 2>&1; then
+            range="${latest}..HEAD"
+          else
+            range="HEAD"               # no tags yet, scan everything
+          fi
+          msgs="$(git log "$range" --format=%B)"
+
+          if   grep -qF '(MAJOR)' <<< "$msgs"; then bump=major
+          elif grep -qF '(MINOR)' <<< "$msgs"; then bump=minor
+          else                                      bump=patch
+          fi
+
+          case "$bump" in
+            major) major=$((major+1)); minor=0; patch=0 ;;
+            minor) minor=$((minor+1)); patch=0 ;;
+            patch) patch=$((patch+1)) ;;
+          esac
+
+          new="v${major}.${minor}.${patch}"
+          echo "bump=$bump"   >> "$GITHUB_OUTPUT"
+          echo "version=$new" >> "$GITHUB_OUTPUT"
+          echo "Bump: $bump -> $new"
+
+      - name: Tag and push
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.bump.outputs.version }}" -m "${{ steps.bump.outputs.version }}"
+          git push origin "${{ steps.bump.outputs.version }}"
