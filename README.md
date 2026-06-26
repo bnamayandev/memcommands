@@ -58,7 +58,7 @@ Launch it and you land in the **search** box. Type to filter your history.
 | `Enter` | Run the top match |
 | `↓` / `↑` / `Ctrl-j` / `Ctrl-n` / `Ctrl-k` / `Ctrl-p` | Drop into the results list |
 | `Ctrl-a` | Toggle the aliased-only view |
-| `Ctrl-c` | Quit |
+| `Esc` / `Ctrl-c` | Quit |
 
 ### 📋 Results (Normal mode)
 

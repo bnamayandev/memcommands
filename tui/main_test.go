@@ -140,6 +140,15 @@ func TestQuitWarnsWhenDirty(t *testing.T) {
 	}
 }
 
+func TestEscFromSearchRequestsQuit(t *testing.T) {
+	// Esc in the search box quits like Ctrl-c; with staged changes it raises
+	// the unsaved-changes prompt instead of quitting outright.
+	m := keys(newModel(t), "ctrl+j", "d", "d", "esc", "esc")
+	if !m.confirmQuit {
+		t.Fatalf("esc from search should request quit and warn on unsaved changes")
+	}
+}
+
 func TestForceQuitDiscardsStagedDeletion(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
