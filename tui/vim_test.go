@@ -563,12 +563,55 @@ func TestEscFromCommandCancelsLine(t *testing.T) {
 }
 
 func TestEscFromAliasClosesBox(t *testing.T) {
-	m := keys(results(t), "m", "esc")
+	// A blank alias opens in insert mode: esc drops to normal, esc again cancels.
+	m := keys(results(t), "m", "esc", "esc")
 	if m.aliasing {
-		t.Fatalf("esc should close the alias box")
+		t.Fatalf("esc from alias-normal should close the alias editor")
 	}
 	if m.focus != focusResults {
 		t.Fatalf("esc from alias should stay in results, got %d", m.focus)
+	}
+}
+
+func TestAliasOpensExistingInNormalMode(t *testing.T) {
+	// Alias cmd0, reopen: the editor pre-fills the label in normal mode.
+	m := keys(results(t), "m", "g", "s", "enter")
+	m = keys(m, "m")
+	if !m.aliasing || m.mode != modeNormal {
+		t.Fatalf("reopening an alias should start in normal mode, got aliasing=%v mode=%d", m.aliasing, m.mode)
+	}
+	wantBuf(t, m, "gs")
+}
+
+func TestEditAliasWithVimMotions(t *testing.T) {
+	// Reopen the alias and append a char with A.
+	m := keys(results(t), "m", "g", "s", "enter")
+	m = keys(m, "m", "A", "x", "enter")
+	labels := core.AliasesForCommand(cmd0, m.aliases)
+	if len(labels) != 1 || labels[0] != "gsx" {
+		t.Fatalf("want single alias 'gsx', got %v", labels)
+	}
+}
+
+func TestAliasReplacesPrevious(t *testing.T) {
+	// Re-aliasing the same command swaps the label — never two at once.
+	m := keys(results(t), "m", "g", "s", "enter")
+	m = keys(m, "m", "S", "g", "b", "enter")
+	labels := core.AliasesForCommand(cmd0, m.aliases)
+	if len(labels) != 1 || labels[0] != "gb" {
+		t.Fatalf("want single replaced alias 'gb', got %v", labels)
+	}
+	if _, ok := m.userAliases["gs"]; ok {
+		t.Fatalf("old alias 'gs' should be gone")
+	}
+}
+
+func TestEmptyAliasClears(t *testing.T) {
+	// Clearing the buffer and saving removes the command's alias.
+	m := keys(results(t), "m", "g", "s", "enter")
+	m = keys(m, "m", "S", "esc", "enter")
+	if labels := core.AliasesForCommand(cmd0, m.aliases); len(labels) != 0 {
+		t.Fatalf("empty alias should clear, got %v", labels)
 	}
 }
 

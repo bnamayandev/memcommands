@@ -192,7 +192,7 @@ func (m model) helpView(width int) string {
 		{"Curate", []binding{
 			{"dd", "remove command from history"},
 			{"u", "undo last removal"},
-			{"m", "set an alias for the command"},
+			{"m", "edit the command's alias (vim motions)"},
 			{"ctrl+a", "toggle aliased-only view"},
 		}},
 		{"Save & run", []binding{
@@ -294,7 +294,8 @@ func (m model) renderSelectedRow(i int, query string, editing, aliasing bool, wi
 }
 
 func (m model) aliasEditPrefix() string {
-	return m.styles.alias.Render("[") + m.aliasInput.View() + m.styles.alias.Render("]") + " "
+	base := m.styles.selectedRow.Italic(true).Foreground(lipgloss.Color(colGreen))
+	return base.Render("[") + m.renderEditLine(base) + base.Render("]") + m.styles.selectedRow.Render(" ")
 }
 
 func (m model) aliasPrefix(command string) string {
@@ -386,7 +387,7 @@ func (m model) statusBar() string {
 
 	if m.aliasing {
 		badge := m.styles.modeInsert.Render("ALIAS")
-		hints := m.styles.hints.Render("enter save · esc cancel")
+		hints := m.styles.hints.Render("vim motions · enter save · esc cancel")
 		if m.aliasError != "" {
 			hints = lipgloss.NewStyle().Foreground(lipgloss.Color(colRed)).Render(m.aliasError)
 		}

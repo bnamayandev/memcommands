@@ -58,10 +58,8 @@ type model struct {
 	// the cursor.
 	visualAnchor int
 
-	// aliasing overlays a box capturing an alias for the selected command;
-	// userAliases is the persisted alias→command map.
+	// aliasing edits the selected command's label in the vim buffer; one per command.
 	aliasing    bool
-	aliasInput  textinput.Model
 	aliasTarget string
 	aliasError  string
 	userAliases map[string]string
@@ -97,13 +95,6 @@ func New(commands []string, aliases core.AliasIndex) *model {
 	input.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(colBlue))
 	input.Focus()
 
-	aliasInput := textinput.New()
-	aliasInput.Placeholder = "type your alias..."
-	aliasInput.Prompt = ""
-	aliasInput.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0))
-	aliasInput.TextStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(colGreen)).Italic(true)
-	aliasInput.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(colGreen))
-
 	userAliases := core.LoadUserAliases()
 	aliases.ByFullCommand = core.BuildUserAliasIndex(userAliases)
 
@@ -117,7 +108,6 @@ func New(commands []string, aliases core.AliasIndex) *model {
 		commands:    nil,
 		aliases:     aliases,
 		userInput:   input,
-		aliasInput:  aliasInput,
 		userAliases: userAliases,
 		deleted:     deleted,
 		edited:      core.LoadEditedCommands(),
@@ -190,12 +180,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateSearch(msg)
 		}
 		return m.updateResults(msg)
-	}
-
-	if m.aliasing {
-		var cmd tea.Cmd
-		m.aliasInput, cmd = m.aliasInput.Update(msg)
-		return m, cmd
 	}
 
 	if m.focus == focusSearch {

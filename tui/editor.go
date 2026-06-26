@@ -143,15 +143,12 @@ func (m model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// updateAlias drives the alias box: keys feed the input except enter/esc.
+// updateAlias edits the alias label in the vim buffer; enter commits from any mode.
 func (m model) updateAlias(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "ctrl+c":
+	if msg.String() == "ctrl+c" {
 		return m.requestQuit()
-	case "esc":
-		m.closeAlias()
-		return m, nil
-	case "enter":
+	}
+	if msg.Type == tea.KeyEnter {
 		if m.saveAlias() {
 			m.closeAlias()
 		}
@@ -159,34 +156,116 @@ func (m model) updateAlias(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	m.aliasError = ""
-	var cmd tea.Cmd
-	m.aliasInput, cmd = m.aliasInput.Update(msg)
-	return m, cmd
+	switch m.mode {
+	case modeInsert:
+		return m.updateInsert(msg)
+	case modeVisual:
+		return m.updateVisual(msg)
+	}
+	return m.updateAliasNormal(msg)
 }
 
-// saveAlias persists the typed alias and rebuilds the search index so it's
-// findable immediately.
+// updateAliasNormal runs the shared buffer motions, with esc to cancel.
+func (m model) updateAliasNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	key := msg.String()
+
+	if m.pending != "" {
+		return m.applyOperator(key), nil
+	}
+	if m.rPending {
+		return m.applyReplace(key), nil
+	}
+	if m.findPending != "" {
+		m.cursor = m.applyFind(key)
+		m.clampCursor()
+		return m, nil
+	}
+	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' || (key == "0" && m.count != "") {
+		m.count += key
+		return m, nil
+	}
+
+	count := m.takeCount()
+	if key == "esc" {
+		m.closeAlias()
+		return m, nil
+	}
+	m.editMotion(key, count)
+	return m, nil
+}
+
+// beginAlias opens the alias editor, pre-filling any existing label; blank opens
+// in insert mode to type, an existing one in normal mode for motions.
+func (m *model) beginAlias() {
+	command := m.commands[m.selectedIndex]
+	m.commitEdit() // stage any pending command edit before reusing the buffer
+	m.aliasTarget = command
+	m.aliasError = ""
+
+	existing := ""
+	if labels := core.AliasesForCommand(command, m.aliases); len(labels) > 0 {
+		existing = labels[0]
+	}
+	m.editBuffer = []rune(existing)
+	m.cursor = 0
+	m.aliasing = true
+	if existing == "" {
+		m.mode = modeInsert
+	} else {
+		m.mode = modeNormal
+	}
+	m.clampCursor()
+}
+
+// saveAlias binds the edited label to the target (one per command); blank clears it.
 func (m *model) saveAlias() bool {
-	alias := strings.TrimSpace(m.aliasInput.Value())
+	alias := strings.TrimSpace(string(m.editBuffer))
 	target := strings.Join(strings.Fields(strings.TrimSpace(m.aliasTarget)), " ")
-	if alias == "" || target == "" {
+	if target == "" {
 		return false
 	}
 
-	if existing, ok := m.userAliases[alias]; ok && existing != target {
+	if alias == "" {
+		if m.clearAliasFor(m.aliasTarget) {
+			m.dirty = true
+			m.rebuildAliasIndex()
+		}
+		return true
+	}
+
+	// Reject a label already bound to a different command.
+	if existing, ok := m.userAliases[alias]; ok &&
+		core.NormalizeCommandKey(existing) != core.NormalizeCommandKey(target) {
 		m.aliasError = fmt.Sprintf("alias %q already in use", alias)
 		return false
 	}
 
+	// One alias per command: drop the old label before binding the new one.
+	m.clearAliasFor(m.aliasTarget)
 	if m.userAliases == nil {
 		m.userAliases = make(map[string]string)
 	}
 	m.userAliases[alias] = target
 	m.dirty = true
+	m.rebuildAliasIndex()
+	return true
+}
+
+// clearAliasFor drops any alias pointing at command, reporting if one was removed.
+func (m *model) clearAliasFor(command string) bool {
+	removed := false
+	for _, label := range core.AliasesForCommand(command, m.aliases) {
+		delete(m.userAliases, label)
+		removed = true
+	}
+	return removed
+}
+
+// rebuildAliasIndex re-derives the alias index and result list from userAliases.
+func (m *model) rebuildAliasIndex() {
 	m.aliases.ByFullCommand = core.BuildUserAliasIndex(m.userAliases)
 	m.corpus = core.NewCorpus(m.history, m.aliases)
 	m.refreshCommands()
-	return true
 }
 
 // updateCommand drives the ":" line: enter executes, esc/backspace-past-start
@@ -263,7 +342,8 @@ func (m *model) save() {
 func (m *model) closeAlias() {
 	m.aliasing = false
 	m.aliasError = ""
-	m.aliasInput.Blur()
+	m.mode = modeNormal
+	m.loadEditBuffer() // restore the command's edit buffer
 }
 
 func (m model) updateInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -374,6 +454,27 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.setSelection(m.selectedIndex - maxResults)
+	case "m":
+		if m.selectedIndex >= 0 && m.selectedIndex < len(m.commands) {
+			m.beginAlias()
+		}
+	case ":":
+		m.commitEdit() // stage any pending edit so :w/:q see it
+		m.commandMode = true
+		m.commandLine = ""
+		m.statusMsg = ""
+	case "u":
+		m.undoDelete()
+	default:
+		m.editMotion(key, count)
+	}
+	return m, nil
+}
+
+// editMotion applies the normal-mode keys that edit the buffer, shared by the
+// command and alias editors.
+func (m *model) editMotion(key string, count int) {
+	switch key {
 	case "h", "left":
 		m.cursor -= count
 		m.clampCursor()
@@ -471,14 +572,6 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor++
 		}
 		m.clampCursor()
-	case "m":
-		if m.selectedIndex >= 0 && m.selectedIndex < len(m.commands) {
-			m.aliasTarget = m.commands[m.selectedIndex]
-			m.aliasInput.SetValue("")
-			m.aliasError = ""
-			m.aliasing = true
-			return m, m.aliasInput.Focus()
-		}
 	case "v":
 		m.mode = modeVisual
 		m.visualAnchor = m.cursor
@@ -493,19 +586,11 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "d", "c", "y":
 		m.pending = key
 		m.pendingCount = count
-	case ":":
-		m.commitEdit() // stage any pending edit so :w/:q see it
-		m.commandMode = true
-		m.commandLine = ""
-		m.statusMsg = ""
-	case "u":
-		m.undoDelete()
 	case "p":
 		m.paste(true)
 	case "P":
 		m.paste(false)
 	}
-	return m, nil
 }
 
 // setSelection moves the highlighted row to i (clamped), keeps it visible, and
@@ -542,6 +627,12 @@ func (m model) applyOperator(key string) model {
 	m.pendingCount = 0
 
 	if op == "d" && key == "d" {
+		if m.aliasing {
+			// `dd` on the single-line alias buffer clears it, like vim.
+			m.editBuffer = m.editBuffer[:0]
+			m.cursor = 0
+			return m
+		}
 		m.deleteSelected()
 		return m
 	}
