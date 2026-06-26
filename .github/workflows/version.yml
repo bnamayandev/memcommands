@@ -3,6 +3,13 @@ name: Version
 on:
   push:
     branches: [main]
+    paths-ignore:        # docs/meta-only pushes don't cut a release
+      - '**.md'
+      - '**.log'
+      - 'LICENSE'
+      - '.gitignore'
+      - '.gitattributes'
+      - 'docs/**'
 
 permissions:
   contents: write
