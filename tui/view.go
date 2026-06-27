@@ -140,11 +140,10 @@ func (m model) renderIndexedCommands(width int) string {
 
 	for i := start; i < end; i++ {
 		selected := i == m.selectedIndex
-		aliasing := selected && m.aliasing
-		editing := selected && m.focus == focusResults && !m.aliasing
+		editing := selected && m.focus == focusResults
 
 		if selected {
-			lines = append(lines, m.renderSelectedRow(i, query, editing, aliasing, width))
+			lines = append(lines, m.renderSelectedRow(i, query, editing, width))
 			continue
 		}
 
@@ -193,7 +192,7 @@ func (m model) helpView(width int) string {
 		{"Curate", []binding{
 			{"dd", "remove command from history"},
 			{"u", "undo last removal"},
-			{"m", "edit the command's alias (vim motions)"},
+			{"m", "add an alias / jump into its [brackets] (vim motions)"},
 			{"ctrl+a", "toggle aliased-only view"},
 		}},
 		{"Save & run", []binding{
@@ -262,29 +261,25 @@ func (m model) confirmQuitView(width int) string {
 	return strings.Join(lines, "\n")
 }
 
-func (m model) renderSelectedRow(i int, query string, editing, aliasing bool, width int) string {
+func (m model) renderSelectedRow(i int, query string, editing bool, width int) string {
 	base := m.styles.selectedRow
 
-	var content string
+	var body string
 	if editing {
-		content = m.renderEditLine(base)
+		// renderEditLine draws the alias [brackets] itself, so no tag prefix.
+		body = m.renderEditLine(base)
 	} else {
 		resolved := m.resolve(m.commands[i])
-		content = highlightMatch(resolved, core.MatchPositions(query, resolved), base, base.Foreground(lipgloss.Color(colPeach)))
-	}
-
-	var prefix string
-	switch {
-	case aliasing:
-		prefix = m.aliasEditPrefix()
-	default:
+		content := highlightMatch(resolved, core.MatchPositions(query, resolved), base, base.Foreground(lipgloss.Color(colPeach)))
 		tagBase := base.Italic(true).Foreground(lipgloss.Color(colGreen))
 		if tags := m.renderAliasTags(m.commands[i], tagBase, tagBase.Foreground(lipgloss.Color(colPeach))); tags != "" {
-			prefix = tags + base.Render(" ")
+			body = tags + base.Render(" ") + content
+		} else {
+			body = content
 		}
 	}
 
-	row := base.Render(fmt.Sprintf("❯ %2d ", i+1)) + prefix + content
+	row := base.Render(fmt.Sprintf("❯ %2d ", i+1)) + body
 	if width > 0 {
 		row = ansi.Truncate(row, width, "…")
 		if pad := width - ansi.StringWidth(row); pad > 0 {
@@ -292,11 +287,6 @@ func (m model) renderSelectedRow(i int, query string, editing, aliasing bool, wi
 		}
 	}
 	return row
-}
-
-func (m model) aliasEditPrefix() string {
-	base := m.styles.selectedRow.Italic(true).Foreground(lipgloss.Color(colGreen))
-	return base.Render("[") + m.renderEditLine(base) + base.Render("]") + m.styles.selectedRow.Render(" ")
 }
 
 func (m model) aliasPrefix(command string) string {
@@ -345,35 +335,61 @@ func highlightMatch(text string, positions []int, base, match lipgloss.Style) st
 	return b.String()
 }
 
+// showAliasBrackets reports whether to draw the [alias] region: an alias exists, or one is being typed.
+func (m model) showAliasBrackets() bool {
+	return m.aliasLen > 0 || (m.mode == modeInsert && m.editAlias)
+}
+
+// renderEditLine draws the buffer as [alias] command; the brackets and gap are decoration, not buffer indices.
 func (m model) renderEditLine(base lipgloss.Style) string {
-	if m.mode == modeVisual {
-		start, end := m.visualRange()
-		visual := base.Background(lipgloss.Color(colBlue)).Foreground(lipgloss.Color(colBase))
-		var b strings.Builder
-		for i, r := range m.editBuffer {
-			if i >= start && i < end {
-				b.WriteString(visual.Render(string(r)))
-			} else {
-				b.WriteString(base.Render(string(r)))
-			}
-		}
-		return b.String()
-	}
+	showBr := m.showAliasBrackets()
+	creatingEmpty := showBr && m.aliasLen == 0
+	aliasStyle := base.Italic(true).Foreground(lipgloss.Color(colGreen))
 
 	cursor := base.Reverse(true)
 	if m.mode == modeInsert {
 		cursor = base.Underline(true)
 	}
+	visual := base.Background(lipgloss.Color(colBlue)).Foreground(lipgloss.Color(colBase))
+	var vs, ve int
+	if m.mode == modeVisual {
+		vs, ve = m.visualRange()
+	}
+
+	render := func(i int, r rune) string {
+		st := base
+		if i < m.aliasLen {
+			st = aliasStyle
+		}
+		switch {
+		case m.mode == modeVisual && i >= vs && i < ve:
+			return visual.Render(string(r))
+		case !creatingEmpty && m.mode != modeVisual && i == m.cursor:
+			return cursor.Render(string(r))
+		}
+		return st.Render(string(r))
+	}
+
+	bracketClose := aliasStyle.Render("]") + base.Render(" ")
 
 	var b strings.Builder
-	for i, r := range m.editBuffer {
-		if i == m.cursor {
-			b.WriteString(cursor.Render(string(r)))
-		} else {
-			b.WriteString(base.Render(string(r)))
+	if showBr {
+		b.WriteString(aliasStyle.Render("["))
+		if creatingEmpty {
+			b.WriteString(cursor.Render(" "))
+			b.WriteString(bracketClose)
 		}
 	}
-	if m.cursor >= len(m.editBuffer) {
+	for i, r := range m.editBuffer {
+		if showBr && m.aliasLen > 0 && i == m.aliasLen {
+			b.WriteString(bracketClose)
+		}
+		b.WriteString(render(i, r))
+	}
+	if showBr && m.aliasLen > 0 && m.aliasLen >= len(m.editBuffer) {
+		b.WriteString(bracketClose) // all-alias buffer: close after the last char
+	}
+	if !creatingEmpty && m.mode != modeVisual && m.cursor >= len(m.editBuffer) {
 		b.WriteString(cursor.Render(" "))
 	}
 	return b.String()
@@ -383,15 +399,6 @@ func (m model) statusBar() string {
 	if m.confirmQuit {
 		badge := m.styles.modeNormal.Background(lipgloss.Color(colRed)).Render("CONFIRM")
 		hints := m.styles.hints.Render("s save & exit · d exit anyway · esc return")
-		return ansi.Truncate(badge+" "+hints, m.width, "…")
-	}
-
-	if m.aliasing {
-		badge := m.styles.modeInsert.Render("ALIAS")
-		hints := m.styles.hints.Render("vim motions · enter save · esc cancel")
-		if m.aliasError != "" {
-			hints = lipgloss.NewStyle().Foreground(lipgloss.Color(colRed)).Render(m.aliasError)
-		}
 		return ansi.Truncate(badge+" "+hints, m.width, "…")
 	}
 
@@ -433,6 +440,10 @@ func (m model) statusBar() string {
 	}
 	if m.aliasFilter {
 		hints = "[aliased] · " + hints
+	}
+	// Flag when the cursor sits in the protected alias region.
+	if m.focus == focusResults && m.statusMsg == "" && (m.cursor < m.aliasLen || (m.showAliasBrackets() && m.aliasLen == 0)) {
+		hints = "editing alias · " + hints
 	}
 
 	bar := badge + " " + m.styles.hints.Render(hints)

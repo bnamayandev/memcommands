@@ -15,7 +15,7 @@ func TestSelectedRowBackgroundIsContinuous(t *testing.T) {
 	defer lipgloss.SetColorProfile(prev)
 
 	m := keys(newModel(t), "ctrl+j", "l", "l", "l")
-	row := m.renderSelectedRow(m.selectedIndex, "", true, false, 40)
+	row := m.renderSelectedRow(m.selectedIndex, "", true, 40)
 
 	const bg = "48;2;"
 	for _, seg := range strings.Split(row, "\x1b[0m") {
