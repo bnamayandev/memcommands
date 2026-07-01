@@ -81,7 +81,7 @@ func (m model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeNormal
 		m.clampCursor()
 	case "enter":
-		return m.run(string(m.editBuffer))
+		return m.run(m.commandText())
 	case "h", "left":
 		m.cursor -= count
 		m.clampCursor()
@@ -98,17 +98,17 @@ func (m model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.clampCursor()
 	case "w", "W":
 		for n := 0; n < count; n++ {
-			m.cursor = nextWordStart(m.editBuffer, m.cursor)
+			m.cursor = m.nextWordStartIn(m.cursor)
 		}
 		m.clampCursor()
 	case "b", "B":
 		for n := 0; n < count; n++ {
-			m.cursor = prevWordStart(m.editBuffer, m.cursor)
+			m.cursor = m.prevWordStartIn(m.cursor)
 		}
 		m.clampCursor()
 	case "e", "E":
 		for n := 0; n < count; n++ {
-			m.cursor = wordEnd(m.editBuffer, m.cursor)
+			m.cursor = m.wordEndIn(m.cursor)
 		}
 		m.clampCursor()
 	case "i", "a":
@@ -141,131 +141,60 @@ func (m model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.clampCursor()
 	case "d", "x":
 		start, end := m.visualRange()
-		m.editBuffer = append(m.editBuffer[:start], m.editBuffer[end:]...)
+		m.deleteBuffer(start, end)
 		m.cursor = start
 		m.mode = modeNormal
 		m.clampCursor()
 	case "c":
 		start, end := m.visualRange()
-		m.editBuffer = append(m.editBuffer[:start], m.editBuffer[end:]...)
+		m.editAlias = start < m.aliasLen
+		m.deleteBuffer(start, end)
 		m.cursor = start
 		m.mode = modeInsert
 	}
 	return m, nil
 }
 
-// updateAlias edits the alias label in the vim buffer; enter commits from any mode.
-func (m model) updateAlias(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if msg.String() == "ctrl+c" {
-		return m.requestQuit()
-	}
-	if msg.Type == tea.KeyEnter {
-		if m.saveAlias() {
-			m.closeAlias()
-		}
-		return m, nil
-	}
-
-	m.aliasError = ""
-	switch m.mode {
-	case modeInsert:
-		return m.updateInsert(msg)
-	case modeVisual:
-		return m.updateVisual(msg)
-	}
-	return m.updateAliasNormal(msg)
-}
-
-// updateAliasNormal runs the shared buffer motions, with esc to cancel.
-func (m model) updateAliasNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	key := msg.String()
-
-	if m.pendingObj != "" {
-		return m.applyOperatorObject(key), nil
-	}
-	if m.pendingFind != "" {
-		return m.applyOperatorFind(key), nil
-	}
-	if m.pending != "" {
-		return m.applyOperator(key), nil
-	}
-	if m.rPending {
-		return m.applyReplace(key), nil
-	}
-	if m.findPending != "" {
-		m.cursor = m.applyFind(key)
-		m.clampCursor()
-		return m, nil
-	}
-	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' || (key == "0" && m.count != "") {
-		m.count += key
-		return m, nil
-	}
-
-	count := m.takeCount()
-	if key == "esc" {
-		m.closeAlias()
-		return m, nil
-	}
-	m.editMotion(key, count)
-	return m, nil
-}
-
-// beginAlias opens the alias editor, pre-filling any existing label; blank opens
-// in insert mode to type, an existing one in normal mode for motions.
-func (m *model) beginAlias() {
-	command := m.commands[m.selectedIndex]
-	m.commitEdit() // stage any pending command edit before reusing the buffer
-	m.aliasTarget = command
-	m.aliasError = ""
+// commitAlias stages the alias region: unchanged is a no-op, blank clears the tag, a clash is rejected.
+func (m *model) commitAlias(command string) {
+	alias := strings.TrimSpace(string(m.editBuffer[:m.aliasLen]))
 
 	existing := ""
 	if labels := core.AliasesForCommand(command, m.aliases); len(labels) > 0 {
 		existing = labels[0]
 	}
-	m.editBuffer = []rune(existing)
-	m.cursor = 0
-	m.aliasing = true
-	if existing == "" {
-		m.mode = modeInsert
-	} else {
-		m.mode = modeNormal
+	if alias == existing {
+		return
 	}
-	m.clampCursor()
-}
 
-// saveAlias binds the edited label to the target (one per command); blank clears it.
-func (m *model) saveAlias() bool {
-	alias := strings.TrimSpace(string(m.editBuffer))
-	target := strings.Join(strings.Fields(strings.TrimSpace(m.aliasTarget)), " ")
+	target := strings.Join(strings.Fields(strings.TrimSpace(command)), " ")
 	if target == "" {
-		return false
+		return
 	}
 
 	if alias == "" {
-		if m.clearAliasFor(m.aliasTarget) {
+		if m.clearAliasFor(command) {
 			m.dirty = true
 			m.rebuildAliasIndex()
 		}
-		return true
+		return
 	}
 
 	// Reject a label already bound to a different command.
-	if existing, ok := m.userAliases[alias]; ok &&
-		core.NormalizeCommandKey(existing) != core.NormalizeCommandKey(target) {
-		m.aliasError = fmt.Sprintf("alias %q already in use", alias)
-		return false
+	if bound, ok := m.userAliases[alias]; ok &&
+		core.NormalizeCommandKey(bound) != core.NormalizeCommandKey(target) {
+		m.statusMsg = fmt.Sprintf("alias %q already in use", alias)
+		return
 	}
 
 	// One alias per command: drop the old label before binding the new one.
-	m.clearAliasFor(m.aliasTarget)
+	m.clearAliasFor(command)
 	if m.userAliases == nil {
 		m.userAliases = make(map[string]string)
 	}
 	m.userAliases[alias] = target
 	m.dirty = true
 	m.rebuildAliasIndex()
-	return true
 }
 
 // clearAliasFor drops any alias pointing at command, reporting if one was removed.
@@ -356,13 +285,6 @@ func (m *model) save() {
 	m.dirty = false
 }
 
-func (m *model) closeAlias() {
-	m.aliasing = false
-	m.aliasError = ""
-	m.mode = modeNormal
-	m.loadEditBuffer() // restore the command's edit buffer
-}
-
 func (m model) updateInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
@@ -370,10 +292,10 @@ func (m model) updateInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor--
 		m.clampCursor()
 	case tea.KeyEnter:
-		return m.run(string(m.editBuffer))
+		return m.run(m.commandText())
 	case tea.KeyBackspace:
 		if m.cursor > 0 {
-			m.editBuffer = append(m.editBuffer[:m.cursor-1], m.editBuffer[m.cursor:]...)
+			m.deleteBuffer(m.cursor-1, m.cursor)
 			m.cursor--
 		}
 	case tea.KeyLeft:
@@ -460,7 +382,7 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.setSelection(target)
 	case "enter":
-		return m.run(string(m.editBuffer))
+		return m.run(m.commandText())
 	case "j", "ctrl+j", "ctrl+n", "down":
 		m.setSelection(m.selectedIndex + count)
 	case "k", "ctrl+k", "ctrl+p", "up":
@@ -479,8 +401,13 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.setSelection(m.selectedIndex - maxResults)
 	case "m":
+		// Jump into the alias; with none yet, open empty [brackets] in insert mode.
 		if m.selectedIndex >= 0 && m.selectedIndex < len(m.commands) {
-			m.beginAlias()
+			m.cursor = 0
+			m.editAlias = true
+			if m.aliasLen == 0 {
+				m.mode = modeInsert
+			}
 		}
 	case ":":
 		m.commitEdit() // stage any pending edit so :w/:q see it
@@ -515,17 +442,17 @@ func (m *model) editMotion(key string, count int) {
 		m.clampCursor()
 	case "w", "W":
 		for n := 0; n < count; n++ {
-			m.cursor = nextWordStart(m.editBuffer, m.cursor)
+			m.cursor = m.nextWordStartIn(m.cursor)
 		}
 		m.clampCursor()
 	case "b", "B":
 		for n := 0; n < count; n++ {
-			m.cursor = prevWordStart(m.editBuffer, m.cursor)
+			m.cursor = m.prevWordStartIn(m.cursor)
 		}
 		m.clampCursor()
 	case "e", "E":
 		for n := 0; n < count; n++ {
-			m.cursor = wordEnd(m.editBuffer, m.cursor)
+			m.cursor = m.wordEndIn(m.cursor)
 		}
 		m.clampCursor()
 	case "f", "F", "t", "T":
@@ -538,17 +465,21 @@ func (m *model) editMotion(key string, count int) {
 		m.cursor = m.repeatFind(reverseFind(m.lastFindCmd), count)
 		m.clampCursor()
 	case "i":
+		m.editAlias = m.cursor < m.aliasLen
 		m.mode = modeInsert
 	case "a":
+		m.editAlias = m.cursor < m.aliasLen
 		m.mode = modeInsert
 		m.cursor++
 		if m.cursor > len(m.editBuffer) {
 			m.cursor = len(m.editBuffer)
 		}
 	case "A":
+		m.editAlias = false
 		m.mode = modeInsert
 		m.cursor = len(m.editBuffer)
 	case "I":
+		m.editAlias = m.aliasLen > 0
 		m.mode = modeInsert
 		m.cursor = 0
 	case "x":
@@ -557,7 +488,7 @@ func (m *model) editMotion(key string, count int) {
 			end = len(m.editBuffer)
 		}
 		if len(m.editBuffer) > 0 && m.cursor < len(m.editBuffer) {
-			m.editBuffer = append(m.editBuffer[:m.cursor], m.editBuffer[end:]...)
+			m.deleteBuffer(m.cursor, end)
 			m.clampCursor()
 		}
 	case "X":
@@ -566,29 +497,32 @@ func (m *model) editMotion(key string, count int) {
 			start = 0
 		}
 		if m.cursor > 0 {
-			m.editBuffer = append(m.editBuffer[:start], m.editBuffer[m.cursor:]...)
+			m.deleteBuffer(start, m.cursor)
 			m.cursor = start
 			m.clampCursor()
 		}
 	case "D":
 		if m.cursor < len(m.editBuffer) {
-			m.editBuffer = m.editBuffer[:m.cursor]
+			m.deleteBuffer(m.cursor, len(m.editBuffer))
 			m.clampCursor()
 		}
 	case "C":
-		m.editBuffer = m.editBuffer[:m.cursor]
+		m.editAlias = m.cursor < m.aliasLen
+		m.deleteBuffer(m.cursor, len(m.editBuffer))
 		m.mode = modeInsert
 	case "s":
 		end := m.cursor + count
 		if end > len(m.editBuffer) {
 			end = len(m.editBuffer)
 		}
+		m.editAlias = m.cursor < m.aliasLen
 		if m.cursor < len(m.editBuffer) {
-			m.editBuffer = append(m.editBuffer[:m.cursor], m.editBuffer[end:]...)
+			m.deleteBuffer(m.cursor, end)
 		}
 		m.mode = modeInsert
 	case "S":
-		m.editBuffer = m.editBuffer[:0]
+		m.editAlias = false
+		m.deleteBuffer(0, len(m.editBuffer))
 		m.cursor = 0
 		m.mode = modeInsert
 	case "Y":
@@ -671,12 +605,6 @@ func (m model) applyOperator(key string) model {
 		m.pending = ""
 		m.pendingCount = 0
 		if op == "d" {
-			if m.aliasing {
-				// `dd` on the single-line alias buffer clears it, like vim.
-				m.editBuffer = m.editBuffer[:0]
-				m.cursor = 0
-				return m
-			}
 			m.deleteSelected()
 			return m
 		}
@@ -787,11 +715,12 @@ func (m model) applyOpRange(op string, start, end int) model {
 	case "y":
 		writeClipboard(string(m.editBuffer[start:end]))
 	case "d":
-		m.editBuffer = append(m.editBuffer[:start], m.editBuffer[end:]...)
+		m.deleteBuffer(start, end)
 		m.cursor = start
 		m.clampCursor()
 	case "c":
-		m.editBuffer = append(m.editBuffer[:start], m.editBuffer[end:]...)
+		m.editAlias = start < m.aliasLen
+		m.deleteBuffer(start, end)
 		m.cursor = start
 		m.mode = modeInsert
 	}
@@ -825,13 +754,13 @@ func (m model) motionSpan(key string, count int) (start, end int, ok bool) {
 	case "w", "W":
 		e := c
 		for n := 0; n < count; n++ {
-			e = nextWordStart(m.editBuffer, e)
+			e = m.nextWordStartIn(e)
 		}
 		return c, e, true
 	case "e", "E":
 		e := c
 		for n := 0; n < count; n++ {
-			e = wordEnd(m.editBuffer, e)
+			e = m.wordEndIn(e)
 		}
 		e++ // operators are inclusive of the word-end char
 		if e > len(m.editBuffer) {
@@ -841,7 +770,7 @@ func (m model) motionSpan(key string, count int) (start, end int, ok bool) {
 	case "b", "B":
 		s := c
 		for n := 0; n < count; n++ {
-			s = prevWordStart(m.editBuffer, s)
+			s = m.prevWordStartIn(s)
 		}
 		return s, c, true
 	}
@@ -982,13 +911,38 @@ func (m *model) persistDeleted() {
 	_ = core.SaveDeletedCommands(commands)
 }
 
+// growsAlias reports whether an insert at p extends the alias; at the boundary it follows editAlias.
+func (m model) growsAlias(p int) bool {
+	return p < m.aliasLen || (p == m.aliasLen && m.editAlias)
+}
+
 func (m *model) insertRunes(rs []rune) {
+	if m.growsAlias(m.cursor) {
+		m.aliasLen += len(rs)
+	}
 	buf := make([]rune, 0, len(m.editBuffer)+len(rs))
 	buf = append(buf, m.editBuffer[:m.cursor]...)
 	buf = append(buf, rs...)
 	buf = append(buf, m.editBuffer[m.cursor:]...)
 	m.editBuffer = buf
 	m.cursor += len(rs)
+}
+
+// deleteBuffer removes [start, end), shrinking aliasLen by the alias runes it covered.
+func (m *model) deleteBuffer(start, end int) {
+	if start < 0 {
+		start = 0
+	}
+	if end > len(m.editBuffer) {
+		end = len(m.editBuffer)
+	}
+	if start >= end {
+		return
+	}
+	if lo, hi := min(start, m.aliasLen), min(end, m.aliasLen); hi > lo {
+		m.aliasLen -= hi - lo
+	}
+	m.editBuffer = append(m.editBuffer[:start], m.editBuffer[end:]...)
 }
 
 func (m *model) paste(after bool) {
@@ -1006,6 +960,9 @@ func (m *model) paste(after bool) {
 		at = len(m.editBuffer)
 	}
 
+	if at < m.aliasLen {
+		m.aliasLen += len(rs)
+	}
 	buf := make([]rune, 0, len(m.editBuffer)+len(rs))
 	buf = append(buf, m.editBuffer[:at]...)
 	buf = append(buf, rs...)
@@ -1035,40 +992,47 @@ func isSpace(r rune) bool {
 	return r == ' ' || r == '\t'
 }
 
-func nextWordStart(rs []rune, i int) int {
-	n := len(rs)
-	if i >= n {
-		return n
+// Word motions pass the alias boundary so it acts as a word break (alias and
+// command never merge into one word) while still moving freely across it.
+func (m model) nextWordStartIn(i int) int { return nextWordStart(m.editBuffer, i, m.aliasLen) }
+func (m model) prevWordStartIn(i int) int { return prevWordStart(m.editBuffer, i, m.aliasLen) }
+func (m model) wordEndIn(i int) int       { return wordEnd(m.editBuffer, i, m.aliasLen) }
+
+// isWordStart reports whether a word begins at i, treating brk as a hard break.
+func isWordStart(rs []rune, i, brk int) bool {
+	if i < 0 || i >= len(rs) || isSpace(rs[i]) {
+		return false
 	}
-	for i < n && !isSpace(rs[i]) {
-		i++
-	}
-	for i < n && isSpace(rs[i]) {
-		i++
-	}
-	return i
+	return i == 0 || i == brk || isSpace(rs[i-1])
 }
 
-// wordEnd returns the index of the current word's last char, or the next word's when already at a word end.
-func wordEnd(rs []rune, i int) int {
-	n := len(rs)
-	if n == 0 {
+// isWordEnd reports whether a word ends at i, treating brk as a hard break.
+func isWordEnd(rs []rune, i, brk int) bool {
+	if i < 0 || i >= len(rs) || isSpace(rs[i]) {
+		return false
+	}
+	return i == len(rs)-1 || i+1 == brk || isSpace(rs[i+1])
+}
+
+func nextWordStart(rs []rune, i, brk int) int {
+	for j := i + 1; j < len(rs); j++ {
+		if isWordStart(rs, j, brk) {
+			return j
+		}
+	}
+	return len(rs)
+}
+
+func wordEnd(rs []rune, i, brk int) int {
+	for j := i + 1; j < len(rs); j++ {
+		if isWordEnd(rs, j, brk) {
+			return j
+		}
+	}
+	if len(rs) == 0 {
 		return 0
 	}
-	if i >= n-1 {
-		return n - 1
-	}
-	i++
-	for i < n && isSpace(rs[i]) {
-		i++
-	}
-	for i+1 < n && !isSpace(rs[i+1]) {
-		i++
-	}
-	if i >= n {
-		i = n - 1
-	}
-	return i
+	return len(rs) - 1
 }
 
 // findDest computes the destination cursor for an f/F/t/T search of target repeated count times, or the original index if not found.
@@ -1294,18 +1258,13 @@ func pairObjectSpan(rs []rune, cur int, open, closer rune, around bool) (int, in
 	return o + 1, c, true
 }
 
-func prevWordStart(rs []rune, i int) int {
-	if i <= 0 {
-		return 0
+func prevWordStart(rs []rune, i, brk int) int {
+	for j := i - 1; j > 0; j-- {
+		if isWordStart(rs, j, brk) {
+			return j
+		}
 	}
-	i--
-	for i > 0 && isSpace(rs[i]) {
-		i--
-	}
-	for i > 0 && !isSpace(rs[i-1]) {
-		i--
-	}
-	return i
+	return 0
 }
 
 func writeClipboard(text string) {

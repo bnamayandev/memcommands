@@ -63,10 +63,12 @@ type model struct {
 	// the cursor.
 	visualAnchor int
 
-	// aliasing edits the selected command's label in the vim buffer; one per command.
-	aliasing    bool
-	aliasTarget string
-	aliasError  string
+	// The alias label is edited inline as a protected [bracket] prefix on the
+	// command buffer; aliasLen is how many leading editBuffer runes belong to it.
+	aliasLen int
+	// editAlias marks that a boundary insert (cursor at aliasLen) should grow the
+	// alias rather than the command; set when entering insert from the alias side.
+	editAlias   bool
 	userAliases map[string]string
 
 	deleted   map[string]string
@@ -175,9 +177,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showHelp = false
 			return m, nil
 		}
-		if m.aliasing {
-			return m.updateAlias(msg)
-		}
 		if m.commandMode {
 			return m.updateCommand(msg)
 		}
@@ -198,7 +197,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "ctrl+c":
+	case "ctrl+c", "esc":
 		return m.requestQuit()
 	case "enter":
 		return m.run(m.firstCommand())
@@ -276,12 +275,29 @@ func (m *model) leaveResults() {
 	m.userInput.Focus()
 }
 
+// loadEditBuffer loads the selected command, prefixed by its alias as a tracked [bracket] region.
 func (m *model) loadEditBuffer() {
 	m.editBuffer = nil
+	m.aliasLen = 0
+	m.editAlias = false
 	if m.selectedIndex >= 0 && m.selectedIndex < len(m.commands) {
-		m.editBuffer = []rune(m.resolve(m.commands[m.selectedIndex]))
+		cmd := m.commands[m.selectedIndex]
+		var buf []rune
+		if labels := core.AliasesForCommand(cmd, m.aliases); len(labels) > 0 {
+			buf = []rune(labels[0])
+			m.aliasLen = len(buf)
+		}
+		m.editBuffer = append(buf, []rune(m.resolve(cmd))...)
 	}
 	m.cursor = 0
+}
+
+// commandText returns the edit buffer without its leading alias region.
+func (m model) commandText() string {
+	if m.aliasLen > len(m.editBuffer) {
+		return ""
+	}
+	return string(m.editBuffer[m.aliasLen:])
 }
 
 // resolve returns the staged edit for a command, else the command itself.
@@ -300,8 +316,10 @@ func (m *model) commitEdit() {
 		return
 	}
 	original := m.commands[m.selectedIndex]
+	m.commitAlias(original)
+
 	key := core.NormalizeCommandKey(original)
-	text := string(m.editBuffer)
+	text := m.commandText()
 
 	if strings.TrimSpace(text) == "" {
 		return

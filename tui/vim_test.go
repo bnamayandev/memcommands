@@ -752,56 +752,134 @@ func TestEscFromCommandCancelsLine(t *testing.T) {
 	}
 }
 
-func TestEscFromAliasClosesBox(t *testing.T) {
-	// A blank alias opens in insert mode: esc drops to normal, esc again cancels.
+// aliased returns a results model with "gs" bound to cmd0 and the cursor reloaded
+// at the start of the unified [gs] go build ./... buffer.
+func aliased(t *testing.T) model {
+	return keys(results(t), "m", "g", "s", "esc", "esc", "ctrl+j")
+}
+
+func TestPressMOpensEmptyAliasInInsert(t *testing.T) {
+	m := keys(results(t), "m")
+	if m.mode != modeInsert || !m.editAlias {
+		t.Fatalf("m should enter insert in the alias region, got mode=%d editAlias=%v", m.mode, m.editAlias)
+	}
+	if !m.showAliasBrackets() || m.aliasLen != 0 {
+		t.Fatalf("m should show empty brackets, brackets=%v aliasLen=%d", m.showAliasBrackets(), m.aliasLen)
+	}
+}
+
+func TestTypingAliasGrowsAliasRegion(t *testing.T) {
+	m := keys(results(t), "m", "g", "s")
+	if m.aliasLen != 2 {
+		t.Fatalf("aliasLen = %d, want 2", m.aliasLen)
+	}
+	wantBuf(t, m, "gs"+cmd0)
+	if m.commandText() != cmd0 {
+		t.Fatalf("command portion = %q, want %q", m.commandText(), cmd0)
+	}
+}
+
+func TestBlankAliasNotSaved(t *testing.T) {
 	m := keys(results(t), "m", "esc", "esc")
-	if m.aliasing {
-		t.Fatalf("esc from alias-normal should close the alias editor")
+	if m.focus != focusSearch {
+		t.Fatalf("esc twice should reach search, got focus %d", m.focus)
 	}
-	if m.focus != focusResults {
-		t.Fatalf("esc from alias should stay in results, got %d", m.focus)
+	if m.dirty {
+		t.Fatalf("an untouched blank alias should not mark the buffer dirty")
 	}
-}
-
-func TestAliasOpensExistingInNormalMode(t *testing.T) {
-	// Alias cmd0, reopen: the editor pre-fills the label in normal mode.
-	m := keys(results(t), "m", "g", "s", "enter")
-	m = keys(m, "m")
-	if !m.aliasing || m.mode != modeNormal {
-		t.Fatalf("reopening an alias should start in normal mode, got aliasing=%v mode=%d", m.aliasing, m.mode)
-	}
-	wantBuf(t, m, "gs")
-}
-
-func TestEditAliasWithVimMotions(t *testing.T) {
-	// Reopen the alias and append a char with A.
-	m := keys(results(t), "m", "g", "s", "enter")
-	m = keys(m, "m", "A", "x", "enter")
-	labels := core.AliasesForCommand(cmd0, m.aliases)
-	if len(labels) != 1 || labels[0] != "gsx" {
-		t.Fatalf("want single alias 'gsx', got %v", labels)
+	if labels := core.AliasesForCommand(cmd0, m.aliases); len(labels) != 0 {
+		t.Fatalf("no alias should be created, got %v", labels)
 	}
 }
 
-func TestAliasReplacesPrevious(t *testing.T) {
-	// Re-aliasing the same command swaps the label — never two at once.
-	m := keys(results(t), "m", "g", "s", "enter")
-	m = keys(m, "m", "S", "g", "b", "enter")
-	labels := core.AliasesForCommand(cmd0, m.aliases)
-	if len(labels) != 1 || labels[0] != "gb" {
-		t.Fatalf("want single replaced alias 'gb', got %v", labels)
+func TestAliasStagedOnLeave(t *testing.T) {
+	m := keys(results(t), "m", "g", "s", "esc", "esc")
+	if !m.dirty {
+		t.Fatalf("staged alias should mark the buffer dirty")
+	}
+	if labels := core.AliasesForCommand(cmd0, m.aliases); len(labels) != 1 || labels[0] != "gs" {
+		t.Fatalf("leaving should stage the label, got %v", labels)
+	}
+}
+
+func TestAliasSavesWithWrite(t *testing.T) {
+	keys(results(t), "m", "g", "s", "esc", ":", "w", "enter")
+	reloaded := *New([]string{cmd1, cmd0}, core.AliasIndex{})
+	if labels := core.AliasesForCommand(cmd0, reloaded.aliases); len(labels) != 1 || labels[0] != "gs" {
+		t.Fatalf("alias should persist after :w, got %v", labels)
+	}
+}
+
+func TestAliasLoadsAsUnifiedBuffer(t *testing.T) {
+	m := aliased(t)
+	wantBuf(t, m, "gs"+cmd0)
+	if m.aliasLen != 2 {
+		t.Fatalf("aliasLen = %d, want 2", m.aliasLen)
+	}
+	wantCursor(t, m, 0)
+}
+
+func TestMotionsCrossAliasIntoCommand(t *testing.T) {
+	m := keys(aliased(t), "l", "l")
+	wantCursor(t, m, 2) // g(0) -> s(1) -> command g(2)
+}
+
+func TestWordMotionDoesNotMergeAliasAndCommand(t *testing.T) {
+	m := results(t)
+	m.editBuffer = []rune("gscmd") // alias "gs", command "cmd"
+	m.aliasLen = 2
+	m.cursor = 0
+	m = keys(m, "e")
+	wantCursor(t, m, 1) // end of alias word "gs", not merged into "cmd"
+	m = keys(m, "e")
+	wantCursor(t, m, 4) // end of command word "cmd"
+}
+
+func TestWordMotionsCrossAliasBoundary(t *testing.T) {
+	m := results(t)
+	m.editBuffer = []rune("gscmd") // alias "gs", command "cmd"
+	m.aliasLen = 2
+	m.cursor = 0
+	m = keys(m, "w")
+	wantCursor(t, m, 2) // w crosses from the alias into the command word
+	m = keys(m, "b")
+	wantCursor(t, m, 0) // b crosses back into the alias
+}
+
+func TestAppendInsideAliasGrowsIt(t *testing.T) {
+	m := keys(aliased(t), "l", "a", "x", "esc", "esc")
+	if labels := core.AliasesForCommand(cmd0, m.aliases); len(labels) != 1 || labels[0] != "gsx" {
+		t.Fatalf("want alias 'gsx', got %v", labels)
+	}
+}
+
+func TestReplaceInsideAliasSwapsLabel(t *testing.T) {
+	m := keys(aliased(t), "l", "r", "b", "esc")
+	if labels := core.AliasesForCommand(cmd0, m.aliases); len(labels) != 1 || labels[0] != "gb" {
+		t.Fatalf("want replaced alias 'gb', got %v", labels)
 	}
 	if _, ok := m.userAliases["gs"]; ok {
 		t.Fatalf("old alias 'gs' should be gone")
 	}
 }
 
-func TestEmptyAliasClears(t *testing.T) {
-	// Clearing the buffer and saving removes the command's alias.
-	m := keys(results(t), "m", "g", "s", "enter")
-	m = keys(m, "m", "S", "esc", "enter")
+func TestEmptyingAliasRemovesIt(t *testing.T) {
+	m := keys(aliased(t), "x", "x")
+	if m.aliasLen != 0 || m.showAliasBrackets() {
+		t.Fatalf("emptied alias should hide brackets, aliasLen=%d brackets=%v", m.aliasLen, m.showAliasBrackets())
+	}
+	m = keys(m, "esc") // leave to commit the cleared alias
 	if labels := core.AliasesForCommand(cmd0, m.aliases); len(labels) != 0 {
-		t.Fatalf("empty alias should clear, got %v", labels)
+		t.Fatalf("emptied alias should clear, got %v", labels)
+	}
+}
+
+func TestClearAliasThenWriteRemovesTag(t *testing.T) {
+	keys(results(t), "m", "g", "s", "esc", ":", "w", "enter")
+	keys(aliased(t), "x", "x", "esc", ":", "w", "enter")
+	reloaded := *New([]string{cmd1, cmd0}, core.AliasIndex{})
+	if labels := core.AliasesForCommand(cmd0, reloaded.aliases); len(labels) != 0 {
+		t.Fatalf("cleared alias should be removed on disk, got %v", labels)
 	}
 }
 
