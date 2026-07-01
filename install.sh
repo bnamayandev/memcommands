@@ -35,11 +35,16 @@ esac
 
 touch "$RC"
 
-# Append the Ctrl-R snippet once; re-runs are no-ops.
+# Strip any prior snippet so re-runs refresh an outdated widget in place.
+END_MARKER="# <<< memcommands (Ctrl-R) <<<"
 if grep -qF "$MARKER" "$RC"; then
-  echo "Ctrl-R binding already present in $RC"
-  echo "Done. Open a new $SHELL_NAME session (or run: source \"$RC\") and press Ctrl-R."
-  exit 0
+  TMP="$(mktemp)"
+  awk -v s="$MARKER" -v e="$END_MARKER" '
+    $0 == s {skip=1}
+    !skip {print}
+    $0 == e {skip=0}
+  ' "$RC" > "$TMP" && mv "$TMP" "$RC"
+  echo "Refreshed existing Ctrl-R binding in $RC"
 fi
 
 case "$SHELL_NAME" in
@@ -48,7 +53,7 @@ case "$SHELL_NAME" in
 
 # >>> memcommands (Ctrl-R) >>>
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
-memcommands-widget() { fc -W; memcommands </dev/tty; zle reset-prompt }
+memcommands-widget() { fc -W; memcommands "$BUFFER" </dev/tty; zle reset-prompt }
 zle -N memcommands-widget
 bindkey '^R' memcommands-widget
 # <<< memcommands (Ctrl-R) <<<
@@ -59,7 +64,7 @@ EOF
 
 # >>> memcommands (Ctrl-R) >>>
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
-memcommands-widget() { history -a; memcommands; }
+memcommands-widget() { history -a; memcommands "$READLINE_LINE"; }
 bind -x '"\C-r": memcommands-widget'
 # <<< memcommands (Ctrl-R) <<<
 EOF
@@ -72,7 +77,7 @@ if not contains $HOME/.local/bin $PATH
     set -gx PATH $HOME/.local/bin $PATH
 end
 function memcommands-widget
-    memcommands
+    memcommands (commandline)
     commandline -f repaint
 end
 bind \cr memcommands-widget
