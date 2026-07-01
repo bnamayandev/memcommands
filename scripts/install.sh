@@ -2,9 +2,9 @@
 # Build memcommands and bind Ctrl-R to it for the current shell on macOS or Linux.
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$HOME/.local/bin"
 MARKER="# >>> memcommands (Ctrl-R) >>>"
+REPO_URL="https://github.com/bnamayandev/memcommands.git"
 
 # Detect the operating system.
 case "$(uname -s)" in
@@ -14,15 +14,34 @@ case "$(uname -s)" in
 esac
 echo "Detected OS: $OS"
 
-# Build the binary, naming it 'memcommands' so it filters its own invocations.
 command -v go >/dev/null 2>&1 || { echo "Go is required to build memcommands. Install Go and retry." >&2; exit 1; }
+
+# Locate the repo root. When run from a checkout, it's the parent of scripts/;
+# when piped from curl there's no checkout, so clone into a cache dir first.
+SOURCE="${BASH_SOURCE[0]:-}"
+if [ -n "$SOURCE" ] && [ -f "$(cd "$(dirname "$SOURCE")/.." && pwd)/go.mod" ]; then
+  REPO_ROOT="$(cd "$(dirname "$SOURCE")/.." && pwd)"
+else
+  command -v git >/dev/null 2>&1 || { echo "git is required to install from the web. Install git and retry." >&2; exit 1; }
+  REPO_ROOT="$HOME/.local/share/memcommands"
+  if [ -d "$REPO_ROOT/.git" ]; then
+    echo "Updating memcommands source in $REPO_ROOT..."
+    git -C "$REPO_ROOT" pull --ff-only
+  else
+    echo "Cloning memcommands into $REPO_ROOT..."
+    mkdir -p "$(dirname "$REPO_ROOT")"
+    git clone --depth 1 "$REPO_URL" "$REPO_ROOT"
+  fi
+fi
+
+# Build the binary, naming it 'memcommands' so it filters its own invocations.
 echo "Building memcommands..."
-( cd "$SCRIPT_DIR" && go build -ldflags="-s -w" -o bin/memcommands ./tui )
+( cd "$REPO_ROOT" && go build -ldflags="-s -w" -o bin/memcommands ./tui )
 
 # Put it on PATH via a symlink so future rebuilds are picked up automatically.
 mkdir -p "$INSTALL_DIR"
-ln -sf "$SCRIPT_DIR/bin/memcommands" "$INSTALL_DIR/memcommands"
-echo "Linked $INSTALL_DIR/memcommands -> $SCRIPT_DIR/bin/memcommands"
+ln -sf "$REPO_ROOT/bin/memcommands" "$INSTALL_DIR/memcommands"
+echo "Linked $INSTALL_DIR/memcommands -> $REPO_ROOT/bin/memcommands"
 
 # Pick the shell and its rc file (macOS bash uses ~/.bash_profile for login shells).
 SHELL_NAME="$(basename "${SHELL:-}")"
