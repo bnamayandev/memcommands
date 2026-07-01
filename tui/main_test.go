@@ -56,6 +56,17 @@ func TestEnterOnSearchRunsFirst(t *testing.T) {
 	}
 }
 
+func TestSetInitialQuerySeedsSearch(t *testing.T) {
+	m := New([]string{"git status", "go build ./..."}, core.AliasIndex{})
+	m.SetInitialQuery("git")
+	if got := m.userInput.Value(); got != "git" {
+		t.Fatalf("search bar not seeded: %q", got)
+	}
+	if m.firstCommand() != "git status" {
+		t.Fatalf("seeded query did not filter results, got %q", m.firstCommand())
+	}
+}
+
 func TestCtrlJFocusesResults(t *testing.T) {
 	m := keys(newModel(t), "ctrl+j")
 	if m.focus != focusResults || m.mode != modeNormal {

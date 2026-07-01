@@ -126,6 +126,12 @@ func New(commands []string, aliases core.AliasIndex) *model {
 	return m
 }
 
+func (m *model) SetInitialQuery(query string) {
+	m.userInput.SetValue(query)
+	m.userInput.CursorEnd()
+	m.refreshCommands()
+}
+
 // aliasesLoadedMsg carries shell aliases loaded async, so the interactive-shell
 // spawn never blocks the first draw.
 type aliasesLoadedMsg struct {

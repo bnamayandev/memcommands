@@ -20,6 +20,10 @@ func main() {
 	// Shell aliases load async (see model.Init) so the UI draws immediately.
 	m := New(filterSelfInvocations(history), core.AliasIndex{})
 
+	if query := strings.TrimSpace(strings.Join(os.Args[1:], " ")); query != "" {
+		m.SetInitialQuery(query)
+	}
+
 	f, err := tea.LogToFile("debug.log", "debug")
 	if err != nil {
 		log.Fatal(err)
