@@ -759,7 +759,6 @@ func aliased(t *testing.T) model {
 }
 
 func TestPressMOpensEmptyAliasInInsert(t *testing.T) {
-	// m on a command with no alias opens empty [brackets] in insert mode.
 	m := keys(results(t), "m")
 	if m.mode != modeInsert || !m.editAlias {
 		t.Fatalf("m should enter insert in the alias region, got mode=%d editAlias=%v", m.mode, m.editAlias)
@@ -770,7 +769,6 @@ func TestPressMOpensEmptyAliasInInsert(t *testing.T) {
 }
 
 func TestTypingAliasGrowsAliasRegion(t *testing.T) {
-	// Typed chars extend the protected alias region, not the command.
 	m := keys(results(t), "m", "g", "s")
 	if m.aliasLen != 2 {
 		t.Fatalf("aliasLen = %d, want 2", m.aliasLen)
@@ -782,7 +780,6 @@ func TestTypingAliasGrowsAliasRegion(t *testing.T) {
 }
 
 func TestBlankAliasNotSaved(t *testing.T) {
-	// m then leave without typing: no alias, nothing dirtied.
 	m := keys(results(t), "m", "esc", "esc")
 	if m.focus != focusSearch {
 		t.Fatalf("esc twice should reach search, got focus %d", m.focus)
@@ -796,7 +793,6 @@ func TestBlankAliasNotSaved(t *testing.T) {
 }
 
 func TestAliasStagedOnLeave(t *testing.T) {
-	// Leaving the row stages the typed label (dirty) like a command edit.
 	m := keys(results(t), "m", "g", "s", "esc", "esc")
 	if !m.dirty {
 		t.Fatalf("staged alias should mark the buffer dirty")
@@ -807,7 +803,6 @@ func TestAliasStagedOnLeave(t *testing.T) {
 }
 
 func TestAliasSavesWithWrite(t *testing.T) {
-	// :w persists the staged label to disk for the next run.
 	keys(results(t), "m", "g", "s", "esc", ":", "w", "enter")
 	reloaded := *New([]string{cmd1, cmd0}, core.AliasIndex{})
 	if labels := core.AliasesForCommand(cmd0, reloaded.aliases); len(labels) != 1 || labels[0] != "gs" {
@@ -816,7 +811,6 @@ func TestAliasSavesWithWrite(t *testing.T) {
 }
 
 func TestAliasLoadsAsUnifiedBuffer(t *testing.T) {
-	// Reselecting the row reloads the alias as a protected prefix on the command.
 	m := aliased(t)
 	wantBuf(t, m, "gs"+cmd0)
 	if m.aliasLen != 2 {
@@ -826,7 +820,6 @@ func TestAliasLoadsAsUnifiedBuffer(t *testing.T) {
 }
 
 func TestMotionsCrossAliasIntoCommand(t *testing.T) {
-	// l walks the alias then steps straight onto the first command char.
 	m := keys(aliased(t), "l", "l")
 	wantCursor(t, m, 2) // g(0) -> s(1) -> command g(2)
 }
@@ -854,7 +847,6 @@ func TestWordMotionsCrossAliasBoundary(t *testing.T) {
 }
 
 func TestAppendInsideAliasGrowsIt(t *testing.T) {
-	// a on the last alias char appends within the alias, not the command.
 	m := keys(aliased(t), "l", "a", "x", "esc", "esc")
 	if labels := core.AliasesForCommand(cmd0, m.aliases); len(labels) != 1 || labels[0] != "gsx" {
 		t.Fatalf("want alias 'gsx', got %v", labels)
@@ -862,7 +854,6 @@ func TestAppendInsideAliasGrowsIt(t *testing.T) {
 }
 
 func TestReplaceInsideAliasSwapsLabel(t *testing.T) {
-	// Editing the alias text rebinds it; the old label is dropped.
 	m := keys(aliased(t), "l", "r", "b", "esc")
 	if labels := core.AliasesForCommand(cmd0, m.aliases); len(labels) != 1 || labels[0] != "gb" {
 		t.Fatalf("want replaced alias 'gb', got %v", labels)
@@ -873,7 +864,6 @@ func TestReplaceInsideAliasSwapsLabel(t *testing.T) {
 }
 
 func TestEmptyingAliasRemovesIt(t *testing.T) {
-	// Deleting every char inside the brackets drops the alias and its brackets.
 	m := keys(aliased(t), "x", "x")
 	if m.aliasLen != 0 || m.showAliasBrackets() {
 		t.Fatalf("emptied alias should hide brackets, aliasLen=%d brackets=%v", m.aliasLen, m.showAliasBrackets())
@@ -885,7 +875,6 @@ func TestEmptyingAliasRemovesIt(t *testing.T) {
 }
 
 func TestClearAliasThenWriteRemovesTag(t *testing.T) {
-	// Bind and save, then empty the label and save again: the tag is gone on disk.
 	keys(results(t), "m", "g", "s", "esc", ":", "w", "enter")
 	keys(aliased(t), "x", "x", "esc", ":", "w", "enter")
 	reloaded := *New([]string{cmd1, cmd0}, core.AliasIndex{})
