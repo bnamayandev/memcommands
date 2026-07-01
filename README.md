@@ -1,4 +1,4 @@
-# vimcommands ⌨️
+# memcommands ⌨️
 
 A "keep it super simple" terminal UI for browsing, editing, and re-running your
 shell history with Vim keybindings.
