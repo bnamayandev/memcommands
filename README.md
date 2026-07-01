@@ -35,6 +35,17 @@ the one you want, tweak it in place with the Vim motions you already know, hit
 
 ## 📦 Install
 
+One line — clones the source, builds the binary, and binds `Ctrl-R` for your shell:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/bnamayandev/memcommands/main/scripts/install.sh | bash
+```
+
+Open a new shell (or `source` your rc file) and press `Ctrl-R`.
+
+<details>
+<summary>Manual build</summary>
+
 ```sh
 go build -ldflags="-s -w" -o bin/cli ./tui
 ```
@@ -47,7 +58,10 @@ Then run the binary:
 ./bin/cli
 ```
 
-(Drop it somewhere on your `$PATH` to call it from anywhere.)
+(Drop it somewhere on your `$PATH` to call it from anywhere. Or run
+`scripts/install.sh` from a checkout to build and wire up `Ctrl-R` in one step.)
+
+</details>
 
 ## 🚀 Usage
 
