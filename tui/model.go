@@ -224,8 +224,14 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
+	before := m.userInput.Value()
 	var cmd tea.Cmd
 	m.userInput, cmd = m.userInput.Update(msg)
+	// Editing the query resets the selection to the top result.
+	if m.userInput.Value() != before {
+		m.selectedIndex = 0
+		m.scrollOffset = 0
+	}
 	m.refreshCommands()
 	return m, cmd
 }
