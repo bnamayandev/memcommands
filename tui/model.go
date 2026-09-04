@@ -47,6 +47,8 @@ type model struct {
 	pendingCount int
 	count        string
 	gPending     bool
+	// pendingG arms an operator awaiting a bare-g target (`ge`/`gE`), e.g. `dge`.
+	pendingG bool
 	// pendingFind arms an operator awaiting an f/F/t/T target, e.g. `dt,`.
 	pendingFind string
 	// pendingObj / objPending arm a text-object char for an operator / visual select.
@@ -242,6 +244,7 @@ func (m *model) enterResults() {
 	m.pending = ""
 	m.count = ""
 	m.gPending = false
+	m.pendingG = false
 	m.rPending = false
 	m.findPending = ""
 	m.pendingFind = ""
@@ -279,6 +282,7 @@ func (m *model) leaveResults() {
 	m.pending = ""
 	m.count = ""
 	m.gPending = false
+	m.pendingG = false
 	m.rPending = false
 	m.findPending = ""
 	m.pendingFind = ""

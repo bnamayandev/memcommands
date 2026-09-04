@@ -69,8 +69,27 @@ func (m model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Resolve an armed bare `g`: only ge/gE extend the selection backward.
+	if m.gPending {
+		m.gPending = false
+		if key == "e" || key == "E" {
+			gCount := m.takeCount()
+			for n := 0; n < gCount; n++ {
+				m.cursor = m.prevWordEndIn(m.cursor)
+			}
+			m.clampCursor()
+		}
+		m.count = ""
+		return m, nil
+	}
+
 	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' || (key == "0" && m.count != "") {
 		m.count += key
+		return m, nil
+	}
+
+	if key == "g" {
+		m.gPending = true
 		return m, nil
 	}
 
@@ -111,6 +130,11 @@ func (m model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor = m.wordEndIn(m.cursor)
 		}
 		m.clampCursor()
+	case "%":
+		if j := m.matchBracketIn(m.cursor); j >= 0 {
+			m.cursor = j
+			m.clampCursor()
+		}
 	case "i", "a":
 		m.objPending = key
 		m.pendingCount = count
@@ -323,6 +347,9 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if m.pendingFind != "" {
 		return m.applyOperatorFind(key), nil
 	}
+	if m.pendingG {
+		return m.applyOperatorG(key), nil
+	}
 	if m.pending != "" {
 		return m.applyOperator(key), nil
 	}
@@ -343,12 +370,19 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// (1-indexed) when a count was given.
 	if m.gPending {
 		m.gPending = false
-		if key == "g" {
+		switch key {
+		case "g":
 			target := 0
 			if m.count != "" {
 				target = m.takeCount() - 1
 			}
 			m.setSelection(target)
+		case "e", "E":
+			gCount := m.takeCount()
+			for n := 0; n < gCount; n++ {
+				m.cursor = m.prevWordEndIn(m.cursor)
+			}
+			m.clampCursor()
 		}
 		m.count = ""
 		return m, nil
@@ -455,6 +489,11 @@ func (m *model) editMotion(key string, count int) {
 			m.cursor = m.wordEndIn(m.cursor)
 		}
 		m.clampCursor()
+	case "%":
+		if j := m.matchBracketIn(m.cursor); j >= 0 {
+			m.cursor = j
+			m.clampCursor()
+		}
 	case "f", "F", "t", "T":
 		m.findPending = key
 		m.findCount = count
@@ -619,6 +658,9 @@ func (m model) applyOperator(key string) model {
 	case "i", "a":
 		m.pendingObj = key
 		return m
+	case "g":
+		m.pendingG = true
+		return m
 	case ";", ",":
 		cmd := m.lastFindCmd
 		if key == "," {
@@ -662,6 +704,27 @@ func (m model) applyOperatorFind(key string) model {
 		return m.applyOpRange(op, start, end)
 	}
 	return m
+}
+
+// applyOperatorG resolves an operator armed with a bare `g` against its ge/gE target.
+func (m model) applyOperatorG(key string) model {
+	op := m.pending
+	count := m.pendingCount
+	if count < 1 {
+		count = 1
+	}
+	m.pendingG = false
+	m.pending = ""
+	m.pendingCount = 0
+
+	if key != "e" && key != "E" {
+		return m
+	}
+	target := m.cursor
+	for n := 0; n < count; n++ {
+		target = m.prevWordEndIn(target)
+	}
+	return m.applyOpRange(op, target, m.cursor+1) // backward: inclusive of the cursor's start char
 }
 
 // applyOperatorObject resolves an operator armed with i/a against its object char.
@@ -773,6 +836,15 @@ func (m model) motionSpan(key string, count int) (start, end int, ok bool) {
 			s = m.prevWordStartIn(s)
 		}
 		return s, c, true
+	case "%":
+		j := m.matchBracketIn(c)
+		if j < 0 {
+			return 0, 0, false
+		}
+		if j >= c {
+			return c, j + 1, true // forward: inclusive of the matched bracket
+		}
+		return j, c + 1, true // backward: inclusive of the starting bracket
 	}
 	return 0, 0, false
 }
@@ -997,6 +1069,17 @@ func isSpace(r rune) bool {
 func (m model) nextWordStartIn(i int) int { return nextWordStart(m.editBuffer, i, m.aliasLen) }
 func (m model) prevWordStartIn(i int) int { return prevWordStart(m.editBuffer, i, m.aliasLen) }
 func (m model) wordEndIn(i int) int       { return wordEnd(m.editBuffer, i, m.aliasLen) }
+func (m model) prevWordEndIn(i int) int   { return prevWordEnd(m.editBuffer, i, m.aliasLen) }
+
+// prevWordEnd finds the end of the word before i, the `ge`/`gE` motion's target.
+func prevWordEnd(rs []rune, i, brk int) int {
+	for j := i - 1; j >= 0; j-- {
+		if isWordEnd(rs, j, brk) {
+			return j
+		}
+	}
+	return 0
+}
 
 // isWordStart reports whether a word begins at i, treating brk as a hard break.
 func isWordStart(rs []rune, i, brk int) bool {
@@ -1269,4 +1352,81 @@ func prevWordStart(rs []rune, i, brk int) int {
 
 func writeClipboard(text string) {
 	_ = clipboard.WriteAll(text)
+}
+
+// matchBracketIn is the `%` motion: the buffer index of the bracket matching
+// the one at or after the cursor.
+func (m model) matchBracketIn(i int) int { return matchBracket(m.editBuffer, i) }
+
+// bracketPair reports the open/close pair a bracket rune belongs to, and
+// whether matching it searches forward (from an opener) or backward (from a
+// closer).
+func bracketPair(r rune) (open, closer rune, forward bool) {
+	switch r {
+	case '(':
+		return '(', ')', true
+	case ')':
+		return '(', ')', false
+	case '[':
+		return '[', ']', true
+	case ']':
+		return '[', ']', false
+	case '{':
+		return '{', '}', true
+	case '}':
+		return '{', '}', false
+	}
+	return 0, 0, false
+}
+
+func isBracket(r rune) bool {
+	switch r {
+	case '(', ')', '[', ']', '{', '}':
+		return true
+	}
+	return false
+}
+
+// matchBracket finds the next bracket at or after i, then returns the index of
+// its balanced counterpart (honoring nesting), or -1 if either is absent.
+func matchBracket(rs []rune, i int) int {
+	if i < 0 {
+		i = 0
+	}
+	j := i
+	for j < len(rs) && !isBracket(rs[j]) {
+		j++
+	}
+	if j >= len(rs) {
+		return -1
+	}
+	open, closer, forward := bracketPair(rs[j])
+
+	depth := 0
+	if forward {
+		for k := j; k < len(rs); k++ {
+			switch rs[k] {
+			case open:
+				depth++
+			case closer:
+				depth--
+				if depth == 0 {
+					return k
+				}
+			}
+		}
+		return -1
+	}
+	for k := j; k >= 0; k-- {
+		switch rs[k] {
+		case closer:
+			depth++
+		case open:
+			depth--
+			if depth == 0 {
+				return k
+			}
+		}
+	}
+	return -1
 }

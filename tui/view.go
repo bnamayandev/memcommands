@@ -179,6 +179,8 @@ func (m model) helpView(width int) string {
 			{"h / l", "move cursor left / right (or ← / →)"},
 			{"0 / ^ / $", "cursor to start / first non-blank / end"},
 			{"w / b / e", "next / prev / end of word (W B E too)"},
+			{"ge / gE", "back to end of previous word"},
+			{"%", "jump to matching ( [ {"},
 			{"f / t + char", "find / till char (; , repeat)"},
 			{"x / X", "delete char at / before cursor"},
 			{"r / ~", "replace char / toggle case"},

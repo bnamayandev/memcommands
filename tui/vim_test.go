@@ -339,6 +339,113 @@ func TestChangeToWordEndEntersInsert(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// ge / gE backward word-end motion and operator
+// ---------------------------------------------------------------------------
+
+func TestBackwardWordEndMotion(t *testing.T) {
+	m := keys(results(t), "$", "g", "e")
+	wantCursor(t, m, 7) // end of "build"
+	m = keys(m, "g", "e")
+	wantCursor(t, m, 1) // end of "go"
+	m = keys(m, "g", "e")
+	wantCursor(t, m, 0) // no word-end further back
+}
+
+func TestBackwardWordEndCount(t *testing.T) {
+	m := keys(results(t), "$", "2", "g", "e")
+	wantCursor(t, m, 1) // two word-ends back: skips "build", lands on "go"
+}
+
+func TestDeleteBackwardToWordEnd(t *testing.T) {
+	m := keys(results(t), "l", "l", "l", "d", "g", "e") // cursor on 'b' of "build"
+	wantBuf(t, m, "guild ./...")                        // deletes back through end of "go", inclusive
+	wantCursor(t, m, 1)
+}
+
+func TestChangeBackwardToWordEnd(t *testing.T) {
+	m := keys(results(t), "l", "l", "l", "c", "g", "e", "X")
+	if m.mode != modeInsert {
+		t.Fatalf("cge should enter insert, got %d", m.mode)
+	}
+	wantBuf(t, m, "gXuild ./...")
+}
+
+func TestEscCancelsOperatorPendingG(t *testing.T) {
+	m := keys(results(t), "d", "g", "esc")
+	wantBuf(t, m, cmd0)
+	if m.pending != "" || m.pendingG {
+		t.Fatalf("pending g-operator should clear after esc, got pending=%q pendingG=%v", m.pending, m.pendingG)
+	}
+}
+
+func TestVisualBackwardWordEndExtends(t *testing.T) {
+	m := bufModel(t, "go build ./...", 4) // cursor on 'u' of build
+	m = keys(m, "v", "g", "e", "d")       // extend back through end of "go", inclusive of 'u'
+	wantBuf(t, m, "gild ./...")
+}
+
+// ---------------------------------------------------------------------------
+// % matching bracket motion and operator
+// ---------------------------------------------------------------------------
+
+func TestMatchBracketForward(t *testing.T) {
+	m := bufModel(t, "func(a, b)", 0)
+	m = keys(m, "%")
+	wantCursor(t, m, 9) // jumps straight to the matching ')'
+}
+
+func TestMatchBracketBackward(t *testing.T) {
+	m := bufModel(t, "func(a, b)", 9) // on ')'
+	m = keys(m, "%")
+	wantCursor(t, m, 4) // matching '('
+}
+
+func TestMatchBracketFindsNextBracketOnLine(t *testing.T) {
+	m := bufModel(t, "echo $(date)", 0) // cursor before the paren
+	m = keys(m, "%")
+	wantCursor(t, m, 11) // finds '(' ahead, then its match
+}
+
+func TestMatchBracketNestedBraces(t *testing.T) {
+	m := bufModel(t, "a{b{c}d}e", 1) // on the outer '{'
+	m = keys(m, "%")
+	wantCursor(t, m, 7) // matching outer '}', honoring the inner pair
+}
+
+func TestMatchBracketNoneIsNoop(t *testing.T) {
+	m := bufModel(t, "no brackets here", 0)
+	m = keys(m, "%")
+	wantCursor(t, m, 0)
+}
+
+func TestDeleteToMatchingBracket(t *testing.T) {
+	m := bufModel(t, "func(a, b)", 4) // cursor on '('
+	m = keys(m, "d", "%")
+	wantBuf(t, m, "func")
+}
+
+func TestDeleteToMatchingBracketBackward(t *testing.T) {
+	m := bufModel(t, "func(a, b)", 9) // cursor on ')'
+	m = keys(m, "d", "%")
+	wantBuf(t, m, "func")
+}
+
+func TestOperatorMatchBracketNoneIsNoop(t *testing.T) {
+	m := bufModel(t, "no brackets here", 0)
+	m = keys(m, "d", "%")
+	wantBuf(t, m, "no brackets here")
+	if m.pending != "" {
+		t.Fatalf("pending operator should clear after a failed %%-motion, got %q", m.pending)
+	}
+}
+
+func TestVisualMatchBracketExtends(t *testing.T) {
+	m := bufModel(t, "func(a, b)", 4) // cursor on '('
+	m = keys(m, "v", "%", "d")
+	wantBuf(t, m, "func")
+}
+
+// ---------------------------------------------------------------------------
 // f / F / t / T find-char and ; , repeat
 // ---------------------------------------------------------------------------
 

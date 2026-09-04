@@ -88,6 +88,8 @@ Once you're in the list, you're in Vim **normal mode** on the selected command.
 | `h` / `l` / `←` / `→` | Move the cursor left / right |
 | `0` / `$` | Jump to start / end of line |
 | `w` / `b` | Next / previous word |
+| `e` / `ge` | End of word / end of previous word (`E` `gE` too) |
+| `%` | Jump to the matching `(` `[` `{` |
 | `i` / `a` / `I` / `A` | Enter insert mode (before/after cursor, line start/end) |
 | `x` | Delete character under cursor |
 | `d` / `c` / `y` + motion | Delete / change / yank (e.g. `dw`, `d$`, `cc`, `yy`) |
@@ -106,7 +108,7 @@ with the usual motions:
 
 | Key | Action |
 | --- | --- |
-| `h` / `l` / `←` / `→` / `0` / `$` / `w` / `b` | Extend the selection |
+| `h` / `l` / `←` / `→` / `0` / `$` / `w` / `b` / `e` / `ge` / `%` | Extend the selection |
 | `y` | Yank the selection to the clipboard |
 | `d` / `x` | Delete the selection |
 | `c` | Delete the selection and drop into insert mode |
