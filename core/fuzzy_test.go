@@ -169,6 +169,47 @@ func TestMatchPositionsReturnsNilWhenNoMatch(t *testing.T) {
 	}
 }
 
+func TestGetFuzzyScoreListTypoToleratesExtraLeadingCharacter(t *testing.T) {
+	history := []string{"this"}
+
+	for _, query := range []string{"tthis", "bthis"} {
+		scored := GetFuzzyScoreList(history, query, AliasIndex{})
+		if len(scored) != 1 {
+			t.Fatalf("query %q: expected one match, got %d", query, len(scored))
+		}
+		if scored[0].Command != "this" {
+			t.Fatalf("query %q: expected %q, got %q", query, "this", scored[0].Command)
+		}
+	}
+}
+
+func TestGetFuzzyScoreListTypoTolerantOnlyAppliesWhenStrictMatchIsEmpty(t *testing.T) {
+	// "that this" is a genuine strict subsequence match for "tthis" (the
+	// repeated 't' comes from "that"), so the strict pass finds it and the
+	// typo-tolerant fallback must not run. "this" alone only matches via
+	// that fallback, so it must not leak into these results.
+	history := []string{"that this", "this"}
+
+	scored := GetFuzzyScoreList(history, "tthis", AliasIndex{})
+	if len(scored) != 1 || scored[0].Command != "that this" {
+		t.Fatalf("expected only the strict match, got %#v", scored)
+	}
+}
+
+func TestGetFuzzyScoreListTypoToleratesAdjacentTransposition(t *testing.T) {
+	scored := GetFuzzyScoreList([]string{"this"}, "htis", AliasIndex{})
+	if len(scored) != 1 || scored[0].Command != "this" {
+		t.Fatalf("expected transposed query to match %q, got %#v", "this", scored)
+	}
+}
+
+func TestMatchPositionsFallsBackToTypoTolerantMatch(t *testing.T) {
+	got := MatchPositions("tthis", "this")
+	if len(got) == 0 {
+		t.Fatalf("expected typo-tolerant positions, got none")
+	}
+}
+
 func TestUserAliasRoundTrip(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)

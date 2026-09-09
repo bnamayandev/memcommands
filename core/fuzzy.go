@@ -242,31 +242,51 @@ func align(q []byte, t matchTarget, wantPos bool) (score int, positions []int, o
 }
 
 // FuzzyScore returns the optimal alignment score of query within target, or -1
-// when target doesn't contain query as a fuzzy subsequence.
+// when target doesn't contain query as a fuzzy subsequence (even after
+// queryTypoVariants' typo tolerance).
 func FuzzyScore(query, target string) int {
 	q := lowerBytes(strings.TrimSpace(query))
 	if len(q) == 0 {
 		return 0
 	}
-	score, _, ok := align(q, prepareTarget(target), false)
-	if !ok {
-		return -1
+	t := prepareTarget(target)
+	if score, _, ok := align(q, t, false); ok {
+		return score
 	}
-	return score
+	if score, ok := bestVariantScoreTolerant(queryTypoVariants(q), []matchTarget{t}); ok {
+		return score
+	}
+	return -1
 }
 
 // MatchPositions returns the byte offsets in target that make up the optimal
-// match for query, or nil when there is no match.
+// match for query, or nil when there is no match. It falls back to
+// queryTypoVariants when query has no strict match, so highlighting still
+// works for a typo-tolerant result.
 func MatchPositions(query, target string) []int {
 	query = strings.TrimSpace(query)
 	if query == "" {
 		return nil
 	}
-	_, positions, ok := align(lowerBytes(query), prepareTarget(target), true)
-	if !ok {
-		return nil
+	q := lowerBytes(query)
+	t := prepareTarget(target)
+	if _, positions, ok := align(q, t, true); ok {
+		return positions
 	}
-	return positions
+
+	var best []int
+	bestScore := negInf
+	for _, tv := range queryTypoVariants(q) {
+		score, positions, ok := align(tv.bytes, t, true)
+		if !ok {
+			continue
+		}
+		if adjusted := score - tv.penalty; adjusted > bestScore {
+			bestScore = adjusted
+			best = positions
+		}
+	}
+	return best
 }
 
 type ScoredCommand struct {
@@ -349,6 +369,78 @@ func bestVariantScore(q []byte, variants []matchTarget) (int, bool) {
 	return best, true
 }
 
+// fuzzyEditPenalty is subtracted from the alignment score for each dropped or
+// transposed character a queryTypoVariants candidate required, so a clean
+// subsequence match always outranks a typo-tolerant one.
+const fuzzyEditPenalty = scoreMatch * 2
+
+// queryTypo is a single-edit mutation of a query: one character dropped, or
+// one adjacent pair swapped.
+type queryTypo struct {
+	bytes   []byte
+	penalty int
+}
+
+// queryTypoVariants returns q with each character dropped and each adjacent
+// pair swapped, deduplicated. It's the fallback tried only when q has no
+// strict subsequence match anywhere, so an extra or transposed keystroke
+// (typing "tthis" or "htis" for "this") still finds the intended command.
+func queryTypoVariants(q []byte) []queryTypo {
+	if len(q) < 2 {
+		return nil
+	}
+
+	seen := map[string]struct{}{string(q): {}}
+	var variants []queryTypo
+
+	add := func(b []byte) {
+		key := string(b)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		variants = append(variants, queryTypo{bytes: b, penalty: fuzzyEditPenalty})
+	}
+
+	for i := range q {
+		dropped := make([]byte, 0, len(q)-1)
+		dropped = append(dropped, q[:i]...)
+		dropped = append(dropped, q[i+1:]...)
+		add(dropped)
+	}
+
+	for i := 0; i+1 < len(q); i++ {
+		if q[i] == q[i+1] {
+			continue
+		}
+		swapped := append([]byte(nil), q...)
+		swapped[i], swapped[i+1] = swapped[i+1], swapped[i]
+		add(swapped)
+	}
+
+	return variants
+}
+
+// bestVariantScoreTolerant is the fallback scorer used when q has no strict
+// match against any variant: it retries each queryTypoVariants candidate
+// against every target variant, charging its penalty, and keeps the best.
+func bestVariantScoreTolerant(tolerant []queryTypo, variants []matchTarget) (int, bool) {
+	best := negInf
+	for _, tv := range tolerant {
+		for i := range variants {
+			if score, _, ok := align(tv.bytes, variants[i], false); ok {
+				if adjusted := score - tv.penalty; adjusted > best {
+					best = adjusted
+				}
+			}
+		}
+	}
+	if best == negInf {
+		return 0, false
+	}
+	return best, true
+}
+
 // corpusEntry precomputes a command's match variants so search doesn't rebuild
 // them on every keystroke.
 type corpusEntry struct {
@@ -399,31 +491,27 @@ func NewCorpus(commandHistory []string, aliases AliasIndex) *Corpus {
 }
 
 // Search returns matches ordered by score then recency; an empty query returns
-// everything most-recent-first.
+// everything most-recent-first. When the strict pass finds nothing, it retries
+// once with queryTypoVariants so a stray or transposed keystroke (typing
+// "tthis" or "bthis" for "this") still surfaces the intended command.
 func (c *Corpus) Search(query string) []ScoredCommand {
 	query = strings.TrimSpace(query)
-	var q []byte
-	if query != "" {
-		q = lowerBytes(query)
-	}
 
-	out := make([]ScoredCommand, 0, len(c.entries))
-	for i := range c.entries {
-		entry := &c.entries[i]
-		score := 0
-		if len(q) > 0 {
-			s, ok := bestVariantScore(q, entry.variants)
-			if !ok {
-				continue
-			}
-			score = s
-		}
-
-		out = append(out, ScoredCommand{
-			Score:   score,
-			Command: entry.command,
-			Index:   entry.index,
+	var out []ScoredCommand
+	if query == "" {
+		out = c.collect(func(*corpusEntry) (int, bool) { return 0, true })
+	} else {
+		q := lowerBytes(query)
+		out = c.collect(func(e *corpusEntry) (int, bool) {
+			return bestVariantScore(q, e.variants)
 		})
+
+		if len(out) == 0 {
+			tolerant := queryTypoVariants(q)
+			out = c.collect(func(e *corpusEntry) (int, bool) {
+				return bestVariantScoreTolerant(tolerant, e.variants)
+			})
+		}
 	}
 
 	sort.Slice(out, func(i, j int) bool {
@@ -433,6 +521,25 @@ func (c *Corpus) Search(query string) []ScoredCommand {
 		return out[i].Score > out[j].Score
 	})
 
+	return out
+}
+
+// collect scores every corpus entry with score, keeping only the ones it
+// accepts.
+func (c *Corpus) collect(score func(*corpusEntry) (int, bool)) []ScoredCommand {
+	out := make([]ScoredCommand, 0, len(c.entries))
+	for i := range c.entries {
+		entry := &c.entries[i]
+		s, ok := score(entry)
+		if !ok {
+			continue
+		}
+		out = append(out, ScoredCommand{
+			Score:   s,
+			Command: entry.command,
+			Index:   entry.index,
+		})
+	}
 	return out
 }
 
