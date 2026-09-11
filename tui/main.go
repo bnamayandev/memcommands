@@ -24,12 +24,6 @@ func main() {
 		m.SetInitialQuery(query)
 	}
 
-	f, err := tea.LogToFile("debug.log", "debug")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer f.Close()
-
 	finalModel, err := tea.NewProgram(m).Run()
 	if err != nil {
 		log.Fatal(err)
