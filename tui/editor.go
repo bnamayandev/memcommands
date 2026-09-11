@@ -644,7 +644,7 @@ func (m model) applyOperator(key string) model {
 		m.pending = ""
 		m.pendingCount = 0
 		if op == "d" {
-			m.deleteSelected()
+			m.deleteSelected(count)
 			return m
 		}
 		return m.applyOpRange(op, 0, len(m.editBuffer))
@@ -944,18 +944,31 @@ func reverseFind(cmd string) string {
 	return ""
 }
 
-func (m *model) deleteSelected() {
+// deleteSelected removes count commands starting at the selection, like vim's
+// `5dd`; the whole group undoes as a single `u`. count is clamped to the
+// commands remaining from the selection down.
+func (m *model) deleteSelected(count int) {
 	if m.selectedIndex < 0 || m.selectedIndex >= len(m.commands) {
 		return
 	}
-	cmd := m.commands[m.selectedIndex]
-	key := core.NormalizeCommandKey(cmd)
+	if count < 1 {
+		count = 1
+	}
+	end := m.selectedIndex + count
+	if end > len(m.commands) {
+		end = len(m.commands)
+	}
 
 	if m.deleted == nil {
 		m.deleted = make(map[string]string)
 	}
-	m.deleted[key] = cmd
-	m.undoStack = append(m.undoStack, key)
+	keys := make([]string, 0, end-m.selectedIndex)
+	for _, cmd := range m.commands[m.selectedIndex:end] {
+		key := core.NormalizeCommandKey(cmd)
+		m.deleted[key] = cmd
+		keys = append(keys, key)
+	}
+	m.undoStack = append(m.undoStack, keys)
 	m.dirty = true
 
 	m.refreshCommands()
@@ -966,9 +979,11 @@ func (m *model) undoDelete() {
 	if len(m.undoStack) == 0 {
 		return
 	}
-	key := m.undoStack[len(m.undoStack)-1]
+	keys := m.undoStack[len(m.undoStack)-1]
 	m.undoStack = m.undoStack[:len(m.undoStack)-1]
-	delete(m.deleted, key)
+	for _, key := range keys {
+		delete(m.deleted, key)
+	}
 	m.dirty = true
 
 	m.refreshCommands()

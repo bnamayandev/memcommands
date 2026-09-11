@@ -192,7 +192,7 @@ func (m model) helpView(width int) string {
 			{"p / P", "paste after / before"},
 		}},
 		{"Curate", []binding{
-			{"dd", "remove command from history"},
+			{"dd / 5dd", "remove command(s) from history"},
 			{"u", "undo last removal"},
 			{"m", "add an alias / jump into its [brackets] (vim motions)"},
 			{"ctrl+a", "toggle aliased-only view"},

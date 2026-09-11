@@ -101,6 +101,51 @@ func TestUndoRestoresDeletedCommand(t *testing.T) {
 	}
 }
 
+func TestDeleteCountRemovesMultipleCommands(t *testing.T) {
+	// Empty query lists most-recent-first: "d", "c", "b", "a".
+	m := newTestModel(t, "a", "b", "c", "d")
+	m = keys(m, "ctrl+j", "2", "d", "d")
+	if want := []string{"b", "a"}; !equalStrings(m.commands, want) {
+		t.Fatalf("want %v left, got %v", want, m.commands)
+	}
+	if string(m.editBuffer) != "b" {
+		t.Fatalf("want buffer to reload to 'b', got %q", string(m.editBuffer))
+	}
+}
+
+func TestDeleteCountClampsAtListEnd(t *testing.T) {
+	m := newTestModel(t, "a", "b", "c")
+	m = keys(m, "ctrl+j", "5", "d", "d")
+	if len(m.commands) != 0 {
+		t.Fatalf("want all commands removed, got %v", m.commands)
+	}
+}
+
+func TestUndoRestoresWholeCountGroup(t *testing.T) {
+	m := newTestModel(t, "a", "b", "c", "d")
+	m = keys(m, "ctrl+j", "3", "d", "d", "u")
+	if want := []string{"d", "c", "b", "a"}; !equalStrings(m.commands, want) {
+		t.Fatalf("want all commands restored by one undo, got %v", m.commands)
+	}
+}
+
+func newTestModel(t *testing.T, commands ...string) model {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	return *New(commands, core.AliasIndex{})
+}
+
+func equalStrings(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestDeleteIsStagedUntilWritten(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)

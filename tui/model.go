@@ -74,7 +74,7 @@ type model struct {
 	userAliases map[string]string
 
 	deleted   map[string]string
-	undoStack []string
+	undoStack [][]string
 	// edited maps a command's normalized key to its rewritten text, so edits
 	// survive navigation and (after :w) restarts.
 	edited map[string]string
