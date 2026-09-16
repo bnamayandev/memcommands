@@ -35,7 +35,9 @@ the one you want, tweak it in place with the Vim motions you already know, hit
 
 ## 📦 Install
 
-One line — clones the source, builds the binary, and binds `Ctrl-R` for your shell:
+Works on macOS, Linux, and Windows (via WSL or Git Bash — `memcommands` is a
+POSIX-shell tool, so native `cmd.exe`/PowerShell aren't supported). One line —
+clones the source, builds the binary, and binds `Ctrl-R` for your shell:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/bnamayandev/memcommands/main/scripts/install.sh | bash
@@ -113,6 +115,12 @@ with the usual motions:
 | `d` / `x` | Delete the selection |
 | `c` | Delete the selection and drop into insert mode |
 | `Esc` | Cancel back to normal mode |
+
+Yank/paste go through the system clipboard, so on Linux they need `xclip`,
+`xsel`, or `wl-clipboard` on `$PATH` (macOS and Windows work out of the box;
+WSL falls back to `clip.exe`/`powershell.exe` automatically). If none of
+those are available, `y`/`p` show the error on the status line instead of
+failing silently.
 
 ### ⌨️ Insert mode
 

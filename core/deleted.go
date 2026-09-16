@@ -2,7 +2,6 @@ package core
 
 import (
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 )
@@ -10,9 +9,9 @@ import (
 func deletedPath() (string, error) {
 	dir := os.Getenv("XDG_CONFIG_HOME")
 	if dir == "" {
-		home := os.Getenv("HOME")
-		if home == "" {
-			return "", errors.New("HOME environment variable is not set")
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
 		}
 		dir = filepath.Join(home, ".config")
 	}

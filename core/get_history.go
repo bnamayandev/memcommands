@@ -16,10 +16,10 @@ import (
 func GetHistoryLines() ([]string, error) {
 	shellPath := os.Getenv("SHELL")
 	shellName := filepath.Base(shellPath)
-	home := os.Getenv("HOME")
 
-	if home == "" {
-		return nil, errors.New("HOME environment variable is not set")
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
 	}
 
 	historyFiles, err := historyCandidates(home, shellName, os.Getenv("HISTFILE"))
@@ -59,7 +59,7 @@ func readInteractiveShellHistory(shellPath string) ([]string, error) {
 		return nil, nil
 	}
 
-	cmd := exec.Command(shellPath, "-ic", command)
+	cmd := exec.Command(ShellExecutable(shellPath), "-ic", command)
 	output, err := cmd.Output()
 	if err != nil {
 		var exitErr *exec.ExitError

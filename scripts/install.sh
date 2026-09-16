@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Build memcommands and bind Ctrl-R to it for the current shell on macOS or Linux.
+# Build memcommands and bind Ctrl-R to it for the current shell on macOS,
+# Linux, or Windows (via WSL or Git Bash).
 set -euo pipefail
 
 INSTALL_DIR="$HOME/.local/bin"
@@ -39,11 +40,14 @@ progress() {
 fail() { printf '\n%s%s✗ Install failed.%s %s\n' "$BOLD" "$RED" "$RESET" "${1:-See the error above.}" >&2; }
 trap 'fail' ERR
 
-# Detect the operating system.
+# Detect the operating system. WSL reports "Linux" here (it's a real Linux
+# kernel), so it needs no special case; Git Bash/MSYS2 report a MINGW*/MSYS*
+# uname, which is native Windows underneath.
 case "$(uname -s)" in
-  Darwin) OS="mac" ;;
-  Linux)  OS="linux" ;;
-  *) echo "Unsupported OS: $(uname -s). Only macOS and Linux are supported." >&2; exit 1 ;;
+  Darwin)       OS="mac" ;;
+  Linux)        OS="linux" ;;
+  MINGW*|MSYS*) OS="windows" ;;
+  *) echo "Unsupported OS: $(uname -s). Only macOS, Linux, and Windows (via WSL or Git Bash) are supported." >&2; exit 1 ;;
 esac
 echo "Detected OS: $OS"
 
@@ -69,19 +73,31 @@ else
 fi
 
 # Build the binary, naming it 'memcommands' so it filters its own invocations.
+# (Windows needs the .exe suffix; PATH lookup from bash/PowerShell/cmd all
+# append it automatically when you just type "memcommands".)
+BIN_NAME="memcommands"
+[ "$OS" = "windows" ] && BIN_NAME="memcommands.exe"
 progress "Building memcommands..."
-( cd "$REPO_ROOT" && go build -ldflags="-s -w" -o bin/memcommands ./tui )
+( cd "$REPO_ROOT" && go build -ldflags="-s -w" -o "bin/$BIN_NAME" ./tui )
 
-# Put it on PATH via a symlink so future rebuilds are picked up automatically.
 mkdir -p "$INSTALL_DIR"
-ln -sf "$REPO_ROOT/bin/memcommands" "$INSTALL_DIR/memcommands"
-progress "Linked $INSTALL_DIR/memcommands -> $REPO_ROOT/bin/memcommands"
+if [ "$OS" = "windows" ]; then
+  # Symlinks need admin rights or Developer Mode on Windows, so copy instead;
+  # re-run this script after pulling updates to refresh the installed copy.
+  cp -f "$REPO_ROOT/bin/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
+  progress "Copied $INSTALL_DIR/$BIN_NAME"
+else
+  # Put it on PATH via a symlink so future rebuilds are picked up automatically.
+  ln -sf "$REPO_ROOT/bin/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
+  progress "Linked $INSTALL_DIR/$BIN_NAME -> $REPO_ROOT/bin/$BIN_NAME"
+fi
 
-# Pick the shell and its rc file (macOS bash uses ~/.bash_profile for login shells).
+# Pick the shell and its rc file (macOS bash and Git Bash both launch as login
+# shells, which read ~/.bash_profile rather than ~/.bashrc).
 SHELL_NAME="$(basename "${SHELL:-}")"
 case "$SHELL_NAME" in
   zsh)  RC="$HOME/.zshrc" ;;
-  bash) if [ "$OS" = "mac" ]; then RC="$HOME/.bash_profile"; else RC="$HOME/.bashrc"; fi ;;
+  bash) if [ "$OS" = "mac" ] || [ "$OS" = "windows" ]; then RC="$HOME/.bash_profile"; else RC="$HOME/.bashrc"; fi ;;
   fish) RC="$HOME/.config/fish/config.fish"; mkdir -p "$(dirname "$RC")" ;;
   *) printf '\nUnrecognized shell '\''%s'\''. Binary is installed; add a Ctrl-R binding manually.\n' "${SHELL_NAME:-unknown}" >&2; exit 0 ;;
 esac

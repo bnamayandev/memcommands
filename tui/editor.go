@@ -159,7 +159,9 @@ func (m model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.clampCursor()
 	case "y":
 		start, end := m.visualRange()
-		writeClipboard(string(m.editBuffer[start:end]))
+		if err := writeClipboard(string(m.editBuffer[start:end])); err != nil {
+			m.statusMsg = err.Error()
+		}
 		m.cursor = start
 		m.mode = modeNormal
 		m.clampCursor()
@@ -565,7 +567,9 @@ func (m *model) editMotion(key string, count int) {
 		m.cursor = 0
 		m.mode = modeInsert
 	case "Y":
-		writeClipboard(string(m.editBuffer))
+		if err := writeClipboard(string(m.editBuffer)); err != nil {
+			m.statusMsg = err.Error()
+		}
 	case "~":
 		for n := 0; n < count && m.cursor < len(m.editBuffer); n++ {
 			m.editBuffer[m.cursor] = toggleCase(m.editBuffer[m.cursor])
@@ -776,7 +780,9 @@ func (m model) applyOpRange(op string, start, end int) model {
 	}
 	switch op {
 	case "y":
-		writeClipboard(string(m.editBuffer[start:end]))
+		if err := writeClipboard(string(m.editBuffer[start:end])); err != nil {
+			m.statusMsg = err.Error()
+		}
 	case "d":
 		m.deleteBuffer(start, end)
 		m.cursor = start
@@ -1034,7 +1040,11 @@ func (m *model) deleteBuffer(start, end int) {
 
 func (m *model) paste(after bool) {
 	text, err := clipboard.ReadAll()
-	if err != nil || text == "" {
+	if err != nil {
+		m.statusMsg = err.Error()
+		return
+	}
+	if text == "" {
 		return
 	}
 	rs := []rune(strings.ReplaceAll(text, "\n", " "))
@@ -1365,8 +1375,8 @@ func prevWordStart(rs []rune, i, brk int) int {
 	return 0
 }
 
-func writeClipboard(text string) {
-	_ = clipboard.WriteAll(text)
+func writeClipboard(text string) error {
+	return clipboard.WriteAll(text)
 }
 
 // matchBracketIn is the `%` motion: the buffer index of the bracket matching

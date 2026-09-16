@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -43,16 +42,11 @@ func main() {
 func runShellCommand(command string, aliases core.AliasIndex) error {
 	shell := os.Getenv("SHELL")
 	if shell == "" {
-		shell = "/bin/sh"
-	}
-
-	// Bubble Tea can leave the tty non-blocking; clear it so the command's reads block.
-	for _, fd := range []int{0, 1, 2} {
-		_ = syscall.SetNonblock(fd, false)
+		shell = defaultShell
 	}
 
 	args := []string{shell, "-lc", core.ExpandAliasCommand(command, aliases)}
-	return syscall.Exec(shell, args, os.Environ())
+	return execShellCommand(core.ShellExecutable(shell), args)
 }
 
 func commandName(command string) string {

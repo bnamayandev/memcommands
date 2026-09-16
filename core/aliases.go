@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"syscall"
 )
 
 type AliasIndex struct {
@@ -27,10 +26,8 @@ func LoadShellAliases() (byAlias map[string]string, byCommand map[string][]strin
 		return byAlias, byCommand
 	}
 
-	cmd := exec.Command(shell, "-ic", "alias")
-	// New session: keeps the shell's job-control off the TTY Bubble Tea owns,
-	// else async loading corrupts input.
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd := exec.Command(ShellExecutable(shell), "-ic", "alias")
+	DetachFromControllingTTY(cmd)
 	cmd.Stdin = nil
 	output, err := cmd.Output()
 	if err != nil {
