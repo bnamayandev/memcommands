@@ -75,6 +75,8 @@ type model struct {
 
 	deleted   map[string]string
 	undoStack [][]string
+	// pinned favorites float to the top of the results list; keyed by normalized command.
+	pinned map[string]string
 	// edited maps a command's normalized key to its rewritten text, so edits
 	// survive navigation and (after :w) restarts.
 	edited map[string]string
@@ -112,6 +114,11 @@ func New(commands []string, aliases core.AliasIndex) *model {
 		deleted[core.NormalizeCommandKey(cmd)] = cmd
 	}
 
+	pinned := make(map[string]string)
+	for _, cmd := range core.LoadPinnedCommands() {
+		pinned[core.NormalizeCommandKey(cmd)] = cmd
+	}
+
 	m := &model{
 		history:     commands,
 		commands:    nil,
@@ -119,6 +126,7 @@ func New(commands []string, aliases core.AliasIndex) *model {
 		userInput:   input,
 		userAliases: userAliases,
 		deleted:     deleted,
+		pinned:      pinned,
 		edited:      core.LoadEditedCommands(),
 		styles:      DefaultStyles(),
 		focus:       focusSearch,
@@ -360,15 +368,22 @@ func (m *model) refreshCommands() {
 	scored := m.corpus.Search(m.userInput.Value())
 
 	m.commands = m.commands[:0]
+	var rest []string
 	for _, s := range scored {
-		if _, ok := m.deleted[core.NormalizeCommandKey(s.Command)]; ok {
+		key := core.NormalizeCommandKey(s.Command)
+		if _, ok := m.deleted[key]; ok {
 			continue
 		}
 		if m.aliasFilter && !m.isAliased(s.Command) {
 			continue
 		}
-		m.commands = append(m.commands, s.Command)
+		if _, ok := m.pinned[key]; ok {
+			m.commands = append(m.commands, s.Command)
+			continue
+		}
+		rest = append(rest, s.Command)
 	}
+	m.commands = append(m.commands, rest...)
 
 	if len(m.commands) == 0 {
 		m.selectedIndex = 0
@@ -384,6 +399,48 @@ func (m *model) refreshCommands() {
 // isAliased reports whether a command carries a user-defined alias label.
 func (m model) isAliased(command string) bool {
 	return len(core.AliasesForCommand(command, m.aliases)) > 0
+}
+
+// isPinned reports whether a command is a pinned favorite.
+func (m model) isPinned(command string) bool {
+	_, ok := m.pinned[core.NormalizeCommandKey(command)]
+	return ok
+}
+
+// togglePin pins or unpins the selected command, then rebuilds the list while
+// keeping the same command under the cursor as it floats to (or from) the top.
+func (m *model) togglePin() {
+	if m.selectedIndex < 0 || m.selectedIndex >= len(m.commands) {
+		return
+	}
+	m.commitEdit()
+	command := m.commands[m.selectedIndex]
+	key := core.NormalizeCommandKey(command)
+	if m.pinned == nil {
+		m.pinned = make(map[string]string)
+	}
+	if _, ok := m.pinned[key]; ok {
+		delete(m.pinned, key)
+	} else {
+		m.pinned[key] = command
+	}
+	m.dirty = true
+
+	m.refreshCommands()
+	m.selectedIndex = m.indexOfCommand(command)
+	m.ensureVisible()
+	m.loadEditBuffer()
+}
+
+// indexOfCommand returns the row of a command by its normalized key, or 0.
+func (m model) indexOfCommand(command string) int {
+	key := core.NormalizeCommandKey(command)
+	for i, c := range m.commands {
+		if core.NormalizeCommandKey(c) == key {
+			return i
+		}
+	}
+	return 0
 }
 
 // toggleAliasFilter flips the aliased-only filter and rebuilds the result list.

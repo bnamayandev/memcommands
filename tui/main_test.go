@@ -146,6 +146,59 @@ func equalStrings(a, b []string) bool {
 	return true
 }
 
+func TestPinFloatsCommandToTop(t *testing.T) {
+	// Empty query lists most-recent-first: "go build" then "git status".
+	// Pin the lower row; it should float to the top and stay selected.
+	m := keys(newModel(t), "ctrl+j", "j", "*")
+	if len(m.commands) == 0 || m.commands[0] != "git status" {
+		t.Fatalf("want pinned command floated to top, got %v", m.commands)
+	}
+	if m.commands[m.selectedIndex] != "git status" {
+		t.Fatalf("selection should follow the pinned command, got %q", m.commands[m.selectedIndex])
+	}
+	if !m.isPinned("git status") {
+		t.Fatalf("command should be pinned")
+	}
+}
+
+func TestUnpinRestoresOrder(t *testing.T) {
+	m := keys(newModel(t), "ctrl+j", "j", "*", "*")
+	if m.isPinned("git status") {
+		t.Fatalf("second '*' should unpin the command")
+	}
+	if m.commands[0] != "go build ./..." {
+		t.Fatalf("want recency order restored after unpin, got %v", m.commands)
+	}
+}
+
+func TestPinIsStagedUntilWritten(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	keys(*New([]string{"git status", "go build ./..."}, core.AliasIndex{}), "ctrl+j", "*")
+
+	unsaved := *New([]string{"git status", "go build ./..."}, core.AliasIndex{})
+	if len(unsaved.pinned) != 0 {
+		t.Fatalf("staged pin should not persist without :w, got %v", unsaved.pinned)
+	}
+}
+
+func TestPinnedCommandPersistsAfterWrite(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	// Pin "git status" and write it to disk.
+	keys(*New([]string{"git status", "go build ./..."}, core.AliasIndex{}), "ctrl+j", "j", "*", ":", "w", "enter")
+
+	reloaded := *New([]string{"git status", "go build ./..."}, core.AliasIndex{})
+	if !reloaded.isPinned("git status") {
+		t.Fatalf("want pin to persist after :w, got %v", reloaded.pinned)
+	}
+	if reloaded.commands[0] != "git status" {
+		t.Fatalf("reloaded pin should float to top, got %v", reloaded.commands)
+	}
+}
+
 func TestDeleteIsStagedUntilWritten(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)

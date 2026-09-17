@@ -27,6 +27,11 @@ the one you want, tweak it in place with the Vim motions you already know, hit
   the command surfaces.
 - 🎚️ **Aliased-only view.** Press `Ctrl-a` (in search or the list) to toggle
   between showing everything and showing only commands you've aliased.
+- ⭐ **Pin your favorites.** Press `*` on any command to pin it. Pinned commands
+  are marked with a `★` and float to the top of the list — even under a search —
+  so your go-to commands are always a keystroke away. Press `*` again to unpin.
+  Pins are saved to `~/.config/memcommands/pinned.json` and persist across
+  sessions.
 - ✏️ **Edit before you run.** Highlight a command and modify it with Vim
   keybindings — change a flag, fix a path, swap an argument — without retyping
   the whole line.
@@ -98,6 +103,7 @@ Once you're in the list, you're in Vim **normal mode** on the selected command.
 | `v` / `V` | Enter visual mode (`V` selects the whole line) |
 | `p` / `P` | Paste after / before cursor |
 | `m` | Add an alias, or jump the cursor into its `[brackets]`; the alias is part of the line and edits with the same Vim motions (only the `[]` are fixed). Clear it to remove. |
+| `*` | Pin / unpin the command (pinned favorites float to the top, marked `★`) |
 | `Ctrl-a` | Toggle the aliased-only view |
 | `Enter` | Run the (possibly edited) command |
 | `Esc` | Back to search |

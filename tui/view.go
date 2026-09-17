@@ -20,6 +20,7 @@ const (
 	colGreen    = "#A6E3A1"
 	colMauve    = "#CBA6F7"
 	colPeach    = "#FAB387"
+	colYellow   = "#F9E2AF"
 	colRed      = "#F38BA8"
 )
 
@@ -149,7 +150,7 @@ func (m model) renderIndexedCommands(width int) string {
 
 		resolved := m.resolve(m.commands[i])
 		text := highlightMatch(resolved, core.MatchPositions(query, resolved), lipgloss.NewStyle(), m.styles.match)
-		line := m.styles.index.Render(fmt.Sprintf("  %2d ", i+1)) + m.aliasPrefix(m.commands[i]) + text
+		line := m.styles.index.Render(fmt.Sprintf("  %2d ", i+1)) + m.pinMarker(m.commands[i], lipgloss.NewStyle()) + m.aliasPrefix(m.commands[i]) + text
 		if width > 0 {
 			line = ansi.Truncate(line, width, "…")
 		}
@@ -195,6 +196,7 @@ func (m model) helpView(width int) string {
 			{"dd / 5dd", "remove command(s) from history"},
 			{"u", "undo last removal"},
 			{"m", "add an alias / jump into its [brackets] (vim motions)"},
+			{"*", "pin / unpin (favorites float to the top)"},
 			{"ctrl+a", "toggle aliased-only view"},
 		}},
 		{"Save & run", []binding{
@@ -281,7 +283,7 @@ func (m model) renderSelectedRow(i int, query string, editing bool, width int) s
 		}
 	}
 
-	row := base.Render(fmt.Sprintf("❯ %2d ", i+1)) + body
+	row := base.Render(fmt.Sprintf("❯ %2d ", i+1)) + m.pinMarker(m.commands[i], base) + body
 	if width > 0 {
 		row = ansi.Truncate(row, width, "…")
 		if pad := width - ansi.StringWidth(row); pad > 0 {
@@ -289,6 +291,15 @@ func (m model) renderSelectedRow(i int, query string, editing bool, width int) s
 		}
 	}
 	return row
+}
+
+// pinMarker renders a fixed-width gutter column: a star for pinned commands, or
+// blank padding otherwise, so pinned and unpinned rows stay aligned.
+func (m model) pinMarker(command string, base lipgloss.Style) string {
+	if m.isPinned(command) {
+		return base.Foreground(lipgloss.Color(colYellow)).Render("★ ")
+	}
+	return base.Render("  ")
 }
 
 func (m model) aliasPrefix(command string) string {

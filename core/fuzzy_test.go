@@ -228,3 +228,22 @@ func TestUserAliasRoundTrip(t *testing.T) {
 		t.Fatalf("expected aliases file to exist: %v", err)
 	}
 }
+
+func TestPinnedRoundTrip(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+
+	in := []string{"git status", "go build ./..."}
+	if err := SavePinnedCommands(in); err != nil {
+		t.Fatalf("save failed: %v", err)
+	}
+
+	out := LoadPinnedCommands()
+	if len(out) != len(in) || out[0] != in[0] || out[1] != in[1] {
+		t.Fatalf("round trip mismatch: got %v", out)
+	}
+
+	if _, err := os.Stat(filepath.Join(dir, "memcommands", "pinned.json")); err != nil {
+		t.Fatalf("expected pinned file to exist: %v", err)
+	}
+}

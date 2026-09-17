@@ -306,6 +306,7 @@ func (m *model) save() {
 		return
 	}
 	m.persistDeleted()
+	m.persistPinned()
 	_ = core.SaveEditedCommands(m.edited)
 	_ = core.SaveUserAliases(m.userAliases)
 	m.dirty = false
@@ -452,6 +453,8 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.statusMsg = ""
 	case "u":
 		m.undoDelete()
+	case "*":
+		m.togglePin()
 	default:
 		m.editMotion(key, count)
 	}
@@ -1002,6 +1005,14 @@ func (m *model) persistDeleted() {
 		commands = append(commands, cmd)
 	}
 	_ = core.SaveDeletedCommands(commands)
+}
+
+func (m *model) persistPinned() {
+	commands := make([]string, 0, len(m.pinned))
+	for _, cmd := range m.pinned {
+		commands = append(commands, cmd)
+	}
+	_ = core.SavePinnedCommands(commands)
 }
 
 // growsAlias reports whether an insert at p extends the alias; at the boundary it follows editAlias.
