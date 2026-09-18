@@ -304,6 +304,57 @@ func TestYankLeavesBufferUntouched(t *testing.T) {
 	}
 }
 
+func TestYankArmsFlashOverYankedSpan(t *testing.T) {
+	m := keys(results(t), "y", "w")
+	if !m.yankActive {
+		t.Fatalf("yw should arm the yank flash")
+	}
+	if m.yankStart != 0 || m.yankEnd != 3 {
+		t.Fatalf("want flash over [0,3) (\"go \"), got [%d,%d)", m.yankStart, m.yankEnd)
+	}
+}
+
+func TestYankFlashClearsOnBufferEdit(t *testing.T) {
+	m := keys(results(t), "y", "w", "x")
+	if m.yankActive {
+		t.Fatalf("editing the buffer should clear a stale yank flash")
+	}
+}
+
+func TestYankWholeLineArmsFlash(t *testing.T) {
+	m := keys(results(t), "Y")
+	if !m.yankActive || m.yankStart != 0 || m.yankEnd != len(cmd0) {
+		t.Fatalf("Y should flash the whole buffer, got active=%v [%d,%d)", m.yankActive, m.yankStart, m.yankEnd)
+	}
+}
+
+func TestYankFlashClearsOnNavigate(t *testing.T) {
+	m := keys(results(t), "y", "w", "j")
+	if m.yankActive {
+		t.Fatalf("moving to another row should clear the yank flash")
+	}
+}
+
+func TestYankFlashFadeMsgClearsOnlyMatchingGeneration(t *testing.T) {
+	m := keys(results(t), "y", "w")
+	if !m.yankActive {
+		t.Fatalf("setup: expected yank flash armed")
+	}
+	stale := m.yankGen - 1
+
+	next, _ := m.Update(yankFadeMsg{gen: stale})
+	m = next.(model)
+	if !m.yankActive {
+		t.Fatalf("a stale generation's fade message should not clear a newer flash")
+	}
+
+	next, _ = m.Update(yankFadeMsg{gen: m.yankGen})
+	m = next.(model)
+	if m.yankActive {
+		t.Fatalf("the matching generation's fade message should clear the flash")
+	}
+}
+
 func TestOperatorWithBadMotionIsNoop(t *testing.T) {
 	m := keys(results(t), "d", "z") // z is not a motion
 	wantBuf(t, m, cmd0)
@@ -759,6 +810,9 @@ func TestVisualYankReturnsToNormal(t *testing.T) {
 		t.Fatalf("visual y should return to normal, got %d", m.mode)
 	}
 	wantCursor(t, m, 0) // cursor collapses to range start
+	if !m.yankActive || m.yankStart != 0 || m.yankEnd != 3 {
+		t.Fatalf("want flash over [0,3), got active=%v [%d,%d)", m.yankActive, m.yankStart, m.yankEnd)
+	}
 }
 
 func TestVisualReplaceFillsSelection(t *testing.T) {

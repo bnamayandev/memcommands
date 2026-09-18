@@ -364,6 +364,7 @@ func (m model) renderEditLine(base lipgloss.Style) string {
 		cursor = base.Underline(true)
 	}
 	visual := base.Background(lipgloss.Color(colBlue)).Foreground(lipgloss.Color(colBase))
+	yankFlash := base.Background(lipgloss.Color(colYellow)).Foreground(lipgloss.Color(colBase))
 	var vs, ve int
 	if m.mode == modeVisual {
 		vs, ve = m.visualRange()
@@ -379,6 +380,8 @@ func (m model) renderEditLine(base lipgloss.Style) string {
 			return visual.Render(string(r))
 		case !creatingEmpty && m.mode != modeVisual && i == m.cursor:
 			return cursor.Render(string(r))
+		case m.yankActive && i >= m.yankStart && i < m.yankEnd:
+			return yankFlash.Render(string(r))
 		}
 		return st.Render(string(r))
 	}

@@ -65,6 +65,13 @@ type model struct {
 	// the cursor.
 	visualAnchor int
 
+	// yankActive highlights the [yankStart, yankEnd) span just copied to the
+	// clipboard until its flash timer fires; yankGen invalidates a stale timer
+	// when a newer yank arms before the old one clears.
+	yankActive         bool
+	yankStart, yankEnd int
+	yankGen            int
+
 	// The alias label is edited inline as a protected [bracket] prefix on the
 	// command buffer; aliasLen is how many leading editBuffer runes belong to it.
 	aliasLen int
@@ -180,6 +187,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.aliases.ByCommand = msg.byCommand
 		m.corpus = core.NewCorpus(m.history, m.aliases)
 		m.refreshCommands()
+		return m, nil
+	case yankFadeMsg:
+		if msg.gen == m.yankGen {
+			m.yankActive = false
+		}
 		return m, nil
 	case tea.KeyMsg:
 		if m.confirmQuit {
@@ -304,6 +316,7 @@ func (m *model) loadEditBuffer() {
 	m.editBuffer = nil
 	m.aliasLen = 0
 	m.editAlias = false
+	m.yankActive = false
 	if m.selectedIndex >= 0 && m.selectedIndex < len(m.commands) {
 		cmd := m.commands[m.selectedIndex]
 		var buf []rune

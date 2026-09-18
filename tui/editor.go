@@ -5,6 +5,7 @@ import (
 	"memcommands/core"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/atotto/clipboard"
@@ -13,6 +14,29 @@ import (
 
 func clearScreen() {
 	fmt.Print("\033[H\033[2J")
+}
+
+// yankFlashDuration is how long a yanked span stays highlighted.
+const yankFlashDuration = 150 * time.Millisecond
+
+// yankFadeMsg clears the yank highlight once its timer fires, unless a newer
+// yank has since armed a later generation.
+type yankFadeMsg struct{ gen int }
+
+// startYank arms the yank-highlight flash over [start, end) and returns the
+// command that clears it after yankFlashDuration.
+func (m *model) startYank(start, end int) tea.Cmd {
+	if start > end {
+		start, end = end, start
+	}
+	m.yankActive = true
+	m.yankStart = start
+	m.yankEnd = end
+	m.yankGen++
+	gen := m.yankGen
+	return tea.Tick(yankFlashDuration, func(time.Time) tea.Msg {
+		return yankFadeMsg{gen: gen}
+	})
 }
 
 func (m model) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -95,6 +119,8 @@ func (m model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	count := m.takeCount()
 
+	var cmd tea.Cmd
+
 	switch key {
 	case "esc":
 		m.mode = modeNormal
@@ -162,6 +188,7 @@ func (m model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if err := writeClipboard(string(m.editBuffer[start:end])); err != nil {
 			m.statusMsg = err.Error()
 		}
+		cmd = m.startYank(start, end)
 		m.cursor = start
 		m.mode = modeNormal
 		m.clampCursor()
@@ -178,7 +205,7 @@ func (m model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor = start
 		m.mode = modeInsert
 	}
-	return m, nil
+	return m, cmd
 }
 
 // commitAlias stages the alias region: unchanged is a no-op, blank clears the tag, a clash is rejected.
@@ -345,16 +372,16 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	// An operator armed with i/a or f/F/t/T consumes the next key as its target.
 	if m.pendingObj != "" {
-		return m.applyOperatorObject(key), nil
+		return m.applyOperatorObject(key)
 	}
 	if m.pendingFind != "" {
-		return m.applyOperatorFind(key), nil
+		return m.applyOperatorFind(key)
 	}
 	if m.pendingG {
-		return m.applyOperatorG(key), nil
+		return m.applyOperatorG(key)
 	}
 	if m.pending != "" {
-		return m.applyOperator(key), nil
+		return m.applyOperator(key)
 	}
 
 	// Resolve a pending `r`: the next key overwrites the char(s) under the cursor.
@@ -456,14 +483,15 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "*":
 		m.togglePin()
 	default:
-		m.editMotion(key, count)
+		return m, m.editMotion(key, count)
 	}
 	return m, nil
 }
 
 // editMotion applies the normal-mode keys that edit the buffer, shared by the
-// command and alias editors.
-func (m *model) editMotion(key string, count int) {
+// command and alias editors. It returns a command only when the key needs one
+// (currently just the yank-highlight flash timer).
+func (m *model) editMotion(key string, count int) tea.Cmd {
 	switch key {
 	case "h", "left":
 		m.cursor -= count
@@ -573,6 +601,7 @@ func (m *model) editMotion(key string, count int) {
 		if err := writeClipboard(string(m.editBuffer)); err != nil {
 			m.statusMsg = err.Error()
 		}
+		return m.startYank(0, len(m.editBuffer))
 	case "~":
 		for n := 0; n < count && m.cursor < len(m.editBuffer); n++ {
 			m.editBuffer[m.cursor] = toggleCase(m.editBuffer[m.cursor])
@@ -598,6 +627,7 @@ func (m *model) editMotion(key string, count int) {
 	case "P":
 		m.paste(false)
 	}
+	return nil
 }
 
 // setSelection moves the highlighted row to i (clamped), keeps it visible, and
@@ -624,13 +654,13 @@ func (m *model) takeCount() int {
 	return n
 }
 
-func (m model) applyOperator(key string) model {
+func (m model) applyOperator(key string) (model, tea.Cmd) {
 	op := m.pending
 
 	// A digit typed after the operator builds the motion count, e.g. `d2w`.
 	if len(key) == 1 && key[0] >= '1' && key[0] <= '9' || (key == "0" && m.count != "") {
 		m.count += key
-		return m
+		return m, nil
 	}
 
 	// Combine the pre-operator count with any post-operator count: `2d3w` = 6.
@@ -652,7 +682,7 @@ func (m model) applyOperator(key string) model {
 		m.pendingCount = 0
 		if op == "d" {
 			m.deleteSelected(count)
-			return m
+			return m, nil
 		}
 		return m.applyOpRange(op, 0, len(m.editBuffer))
 	}
@@ -661,13 +691,13 @@ func (m model) applyOperator(key string) model {
 	switch key {
 	case "f", "F", "t", "T":
 		m.pendingFind = key
-		return m
+		return m, nil
 	case "i", "a":
 		m.pendingObj = key
-		return m
+		return m, nil
 	case "g":
 		m.pendingG = true
-		return m
+		return m, nil
 	case ";", ",":
 		cmd := m.lastFindCmd
 		if key == "," {
@@ -678,7 +708,7 @@ func (m model) applyOperator(key string) model {
 		if start, end, ok := m.opFindSpan(cmd, m.lastFindChar, count); ok && m.lastFindCmd != "" {
 			return m.applyOpRange(op, start, end)
 		}
-		return m
+		return m, nil
 	}
 
 	m.pending = ""
@@ -686,11 +716,11 @@ func (m model) applyOperator(key string) model {
 	if start, end, ok := m.motionSpan(key, count); ok {
 		return m.applyOpRange(op, start, end)
 	}
-	return m
+	return m, nil
 }
 
 // applyOperatorFind resolves an operator armed with f/F/t/T against its target.
-func (m model) applyOperatorFind(key string) model {
+func (m model) applyOperatorFind(key string) (model, tea.Cmd) {
 	cmd := m.pendingFind
 	op := m.pending
 	count := m.pendingCount
@@ -703,18 +733,18 @@ func (m model) applyOperatorFind(key string) model {
 
 	rs := []rune(key)
 	if len(rs) != 1 {
-		return m
+		return m, nil
 	}
 	m.lastFindCmd = cmd
 	m.lastFindChar = rs[0]
 	if start, end, ok := m.opFindSpan(cmd, rs[0], count); ok {
 		return m.applyOpRange(op, start, end)
 	}
-	return m
+	return m, nil
 }
 
 // applyOperatorG resolves an operator armed with a bare `g` against its ge/gE target.
-func (m model) applyOperatorG(key string) model {
+func (m model) applyOperatorG(key string) (model, tea.Cmd) {
 	op := m.pending
 	count := m.pendingCount
 	if count < 1 {
@@ -725,7 +755,7 @@ func (m model) applyOperatorG(key string) model {
 	m.pendingCount = 0
 
 	if key != "e" && key != "E" {
-		return m
+		return m, nil
 	}
 	target := m.cursor
 	for n := 0; n < count; n++ {
@@ -735,7 +765,7 @@ func (m model) applyOperatorG(key string) model {
 }
 
 // applyOperatorObject resolves an operator armed with i/a against its object char.
-func (m model) applyOperatorObject(key string) model {
+func (m model) applyOperatorObject(key string) (model, tea.Cmd) {
 	obj := m.pendingObj
 	op := m.pending
 	count := m.pendingCount
@@ -749,7 +779,7 @@ func (m model) applyOperatorObject(key string) model {
 	if start, end, ok := m.objectSpan(obj, key, count); ok {
 		return m.applyOpRange(op, start, end)
 	}
-	return m
+	return m, nil
 }
 
 // applyVisualObject sets the selection to the resolved text object's span.
@@ -771,7 +801,7 @@ func (m model) applyVisualObject(key string) model {
 }
 
 // applyOpRange applies the pending operator over the half-open [start, end) span.
-func (m model) applyOpRange(op string, start, end int) model {
+func (m model) applyOpRange(op string, start, end int) (model, tea.Cmd) {
 	if start > end {
 		start, end = end, start
 	}
@@ -781,11 +811,13 @@ func (m model) applyOpRange(op string, start, end int) model {
 	if end > len(m.editBuffer) {
 		end = len(m.editBuffer)
 	}
+	var cmd tea.Cmd
 	switch op {
 	case "y":
 		if err := writeClipboard(string(m.editBuffer[start:end])); err != nil {
 			m.statusMsg = err.Error()
 		}
+		cmd = m.startYank(start, end)
 	case "d":
 		m.deleteBuffer(start, end)
 		m.cursor = start
@@ -796,7 +828,7 @@ func (m model) applyOpRange(op string, start, end int) model {
 		m.cursor = start
 		m.mode = modeInsert
 	}
-	return m
+	return m, cmd
 }
 
 // motionSpan resolves a single-key motion to the half-open [start, end) buffer
@@ -1021,6 +1053,7 @@ func (m model) growsAlias(p int) bool {
 }
 
 func (m *model) insertRunes(rs []rune) {
+	m.yankActive = false
 	if m.growsAlias(m.cursor) {
 		m.aliasLen += len(rs)
 	}
@@ -1043,6 +1076,7 @@ func (m *model) deleteBuffer(start, end int) {
 	if start >= end {
 		return
 	}
+	m.yankActive = false
 	if lo, hi := min(start, m.aliasLen), min(end, m.aliasLen); hi > lo {
 		m.aliasLen -= hi - lo
 	}
@@ -1058,6 +1092,7 @@ func (m *model) paste(after bool) {
 	if text == "" {
 		return
 	}
+	m.yankActive = false
 	rs := []rune(strings.ReplaceAll(text, "\n", " "))
 
 	at := m.cursor
