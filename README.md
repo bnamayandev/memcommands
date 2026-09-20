@@ -147,6 +147,27 @@ app:
 Your own invocations of `vimcommands` are filtered out of the list, so it
 doesn't clutter its own history.
 
+## 🔀 zelcommands
+
+`zelcommands` is a sibling tool in this repo: the same vim-motion, fuzzy-search
+list, but the rows are your [zellij](https://zellij.dev) sessions instead of
+shell history, and the actions drive `zellij` instead of re-running a command.
+The same `scripts/install.sh` installs it alongside memcommands — instead of a
+keybinding, it opens whenever you type `zl`.
+
+| Key | Action |
+| --- | --- |
+| `Enter` | Attach to the selected session — attaching to an exited one resurrects it |
+| `:new <name>` | Create a session (a blank name uses the current search text) |
+| `i` / `a` / `cc` / `S` … | Rename the session, with the same Vim motions as memcommands |
+| `dd` / `5dd` | Delete session(s) — force-removes them (killing first if running), with confirmation |
+| `K` / `5K` | Kill session(s) — ends the process only, with confirmation |
+| `m` | Add a local search alias, same as memcommands |
+| `*` | Pin a favorite session |
+
+Press `?` inside zelcommands for the full keybindings cheat-sheet, same as
+memcommands.
+
 ## 📄 License
 
 See repository.

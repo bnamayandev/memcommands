@@ -11,6 +11,10 @@ import (
 
 const maxResults = 10
 
+// appName scopes this tool's local config (aliases, pins) to its own
+// ~/.config/zelcommands/ directory, separate from memcommands.
+const appName = "zelcommands"
+
 type focusState int
 
 const (
@@ -26,16 +30,29 @@ const (
 	modeVisual
 )
 
+// confirmKind identifies which destructive action a confirm overlay is armed
+// for. Unlike memcommands' local, undoable dd, kill/delete here are real
+// zellij calls, so they get a confirmation step and no undo.
+type confirmKind int
+
+const (
+	confirmNone confirmKind = iota
+	confirmKill
+	confirmDelete
+)
+
 type model struct {
-	history       []string
+	sessions      []core.Session
+	byName        map[string]core.Session
 	corpus        *core.Corpus
-	commands      []string
 	aliases       core.AliasIndex
+	commands      []string // session names, in fuzzy-match/pin order
 	width         int
 	height        int
 	selectedIndex int
 	scrollOffset  int
-	executed      string
+	attachName    string // set on quit-to-attach; empty means the app just quit
+	attachCreate  bool
 	userInput     textinput.Model
 	styles        *Styles
 
@@ -73,26 +90,21 @@ type model struct {
 	yankGen            int
 
 	// The alias label is edited inline as a protected [bracket] prefix on the
-	// command buffer; aliasLen is how many leading editBuffer runes belong to it.
+	// name buffer; aliasLen is how many leading editBuffer runes belong to it.
 	aliasLen int
 	// editAlias marks that a boundary insert (cursor at aliasLen) should grow the
-	// alias rather than the command; set when entering insert from the alias side.
+	// alias rather than the session name.
 	editAlias   bool
 	userAliases map[string]string
 
-	deleted   map[string]string
-	undoStack [][]string
-	// pinned favorites float to the top of the results list; keyed by normalized command.
+	// pinned favorites float to the top of the results list; keyed by normalized name.
 	pinned map[string]string
-	// edited maps a command's normalized key to its rewritten text, so edits
-	// survive navigation and (after :w) restarts.
-	edited map[string]string
 
 	// vim-style ":" command line; commandLine is the text after the colon.
 	commandMode bool
 	commandLine string
 	statusMsg   string // transient message shown until the next normal-mode key
-	dirty       bool   // staged aliases/deletions not yet written to disk
+	dirty       bool   // staged aliases/pins not yet written to disk
 
 	// showHelp overlays the keybindings cheat-sheet, toggled with "?".
 	showHelp bool
@@ -100,47 +112,53 @@ type model struct {
 	// confirmQuit shows the unsaved-changes prompt raised on ctrl+c.
 	confirmQuit bool
 
-	// aliasFilter (ctrl+a) shows only aliased commands.
+	// confirm arms the kill/delete confirmation overlay; confirmTargets holds
+	// the session name(s) it would act on.
+	confirm        confirmKind
+	confirmTargets []string
+
+	// aliasFilter (ctrl+a) shows only aliased sessions.
 	aliasFilter bool
 }
 
-func New(commands []string, aliases core.AliasIndex) *model {
+func New(sessions []core.Session, aliases core.AliasIndex) *model {
 	input := textinput.New()
-	input.Placeholder = "search history…"
+	input.Placeholder = "search sessions…"
 	input.Prompt = "❯ "
 	input.PromptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(colBlue))
 	input.PlaceholderStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0))
 	input.Cursor.Style = lipgloss.NewStyle().Foreground(lipgloss.Color(colBlue))
 	input.Focus()
 
-	userAliases := core.LoadUserAliases("memcommands")
+	userAliases := core.LoadUserAliases(appName)
 	aliases.ByFullCommand = core.BuildUserAliasIndex(userAliases)
 
-	deleted := make(map[string]string)
-	for _, cmd := range core.LoadDeletedCommands() {
-		deleted[core.NormalizeCommandKey(cmd)] = cmd
-	}
-
 	pinned := make(map[string]string)
-	for _, cmd := range core.LoadPinnedCommands("memcommands") {
-		pinned[core.NormalizeCommandKey(cmd)] = cmd
+	for _, name := range core.LoadPinnedCommands(appName) {
+		pinned[core.NormalizeCommandKey(name)] = name
 	}
 
 	m := &model{
-		history:     commands,
-		commands:    nil,
+		sessions:    sessions,
 		aliases:     aliases,
 		userInput:   input,
 		userAliases: userAliases,
-		deleted:     deleted,
 		pinned:      pinned,
-		edited:      core.LoadEditedCommands(),
 		styles:      DefaultStyles(),
 		focus:       focusSearch,
 	}
-	m.corpus = core.NewCorpus(m.history, m.aliases)
+	m.indexSessions()
+	m.corpus = core.NewCorpus(m.sessionNames(), m.aliases)
 	m.refreshCommands()
 	return m
+}
+
+// indexSessions rebuilds byName from the current session list.
+func (m *model) indexSessions() {
+	m.byName = make(map[string]core.Session, len(m.sessions))
+	for _, s := range m.sessions {
+		m.byName[s.Name] = s
+	}
 }
 
 func (m *model) SetInitialQuery(query string) {
@@ -149,20 +167,16 @@ func (m *model) SetInitialQuery(query string) {
 	m.refreshCommands()
 }
 
-// aliasesLoadedMsg carries shell aliases loaded async, so the interactive-shell
-// spawn never blocks the first draw.
-type aliasesLoadedMsg struct {
-	byAlias   map[string]string
-	byCommand map[string][]string
-}
-
-func loadShellAliases() tea.Msg {
-	byAlias, byCommand := core.LoadShellAliases()
-	return aliasesLoadedMsg{byAlias: byAlias, byCommand: byCommand}
+func (m model) sessionNames() []string {
+	names := make([]string, len(m.sessions))
+	for i, s := range m.sessions {
+		names[i] = s.Name
+	}
+	return names
 }
 
 func (m model) Init() tea.Cmd {
-	return loadShellAliases
+	return nil
 }
 
 // contentWidth is the width inside the borders (1 column per side).
@@ -182,12 +196,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.userInput.Width = max(0, m.innerWidth()-3)
 		return m, nil
-	case aliasesLoadedMsg:
-		m.aliases.ByAlias = msg.byAlias
-		m.aliases.ByCommand = msg.byCommand
-		m.corpus = core.NewCorpus(m.history, m.aliases)
-		m.refreshCommands()
-		return m, nil
 	case yankFadeMsg:
 		if msg.gen == m.yankGen {
 			m.yankActive = false
@@ -196,6 +204,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if m.confirmQuit {
 			return m.updateConfirmQuit(msg)
+		}
+		if m.confirm != confirmNone {
+			return m.updateConfirm(msg)
 		}
 		// While the help overlay is up, any key dismisses it.
 		if m.showHelp {
@@ -228,7 +239,7 @@ func (m model) updateSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "ctrl+c", "esc":
 		return m.requestQuit()
 	case "enter":
-		return m.run(m.firstCommand())
+		return m.attachSelected(m.firstCommand(), false)
 	case "ctrl+j", "ctrl+n", "ctrl+k", "ctrl+p", "down", "up":
 		if len(m.commands) == 0 {
 			return m, nil
@@ -296,7 +307,7 @@ func (m *model) ensureVisible() {
 }
 
 func (m *model) leaveResults() {
-	m.commitEdit()
+	m.commitRename()
 	m.focus = focusSearch
 	m.mode = modeNormal
 	m.pending = ""
@@ -311,70 +322,91 @@ func (m *model) leaveResults() {
 	m.userInput.Focus()
 }
 
-// loadEditBuffer loads the selected command, prefixed by its alias as a tracked [bracket] region.
+// loadEditBuffer loads the selected session's name, prefixed by its alias as a tracked [bracket] region.
 func (m *model) loadEditBuffer() {
 	m.editBuffer = nil
 	m.aliasLen = 0
 	m.editAlias = false
 	m.yankActive = false
 	if m.selectedIndex >= 0 && m.selectedIndex < len(m.commands) {
-		cmd := m.commands[m.selectedIndex]
+		name := m.commands[m.selectedIndex]
 		var buf []rune
-		if labels := core.AliasesForCommand(cmd, m.aliases); len(labels) > 0 {
+		if labels := core.AliasesForCommand(name, m.aliases); len(labels) > 0 {
 			buf = []rune(labels[0])
 			m.aliasLen = len(buf)
 		}
-		m.editBuffer = append(buf, []rune(m.resolve(cmd))...)
+		m.editBuffer = append(buf, []rune(name)...)
 	}
 	m.cursor = 0
 }
 
-// commandText returns the edit buffer without its leading alias region.
-func (m model) commandText() string {
+// nameText returns the edit buffer without its leading alias region.
+func (m model) nameText() string {
 	if m.aliasLen > len(m.editBuffer) {
 		return ""
 	}
 	return string(m.editBuffer[m.aliasLen:])
 }
 
-// resolve returns the staged edit for a command, else the command itself.
-func (m model) resolve(command string) string {
-	if text, ok := m.edited[core.NormalizeCommandKey(command)]; ok {
-		return text
+// selectedSession returns the session under the cursor, if any.
+func (m model) selectedSession() (core.Session, bool) {
+	if m.selectedIndex < 0 || m.selectedIndex >= len(m.commands) {
+		return core.Session{}, false
 	}
-	return command
+	s, ok := m.byName[m.commands[m.selectedIndex]]
+	return s, ok
 }
 
-// commitEdit stages the edit buffer against the selected command before leaving
-// it (navigate, run, :command). A buffer matching the original clears the
-// overlay; an empty buffer is ignored so a command can't be blanked out.
-func (m *model) commitEdit() {
-	if m.focus != focusResults || m.selectedIndex < 0 || m.selectedIndex >= len(m.commands) {
+// commitRename stages the alias region like memcommands, then — unlike
+// memcommands — commits a changed name immediately as a real zellij rename
+// call, since the buffer here is live state, not a local override. An EXITED
+// session (no live IPC socket) or a failed call reverts the buffer.
+func (m *model) commitRename() {
+	if m.focus != focusResults {
 		return
 	}
-	original := m.commands[m.selectedIndex]
-	m.commitAlias(original)
+	session, ok := m.selectedSession()
+	if !ok {
+		return
+	}
+	m.commitAlias(session.Name)
 
-	key := core.NormalizeCommandKey(original)
-	text := m.commandText()
+	newName := strings.TrimSpace(m.nameText())
+	if newName == "" || newName == session.Name {
+		return
+	}
 
-	if strings.TrimSpace(text) == "" {
+	if session.Exited {
+		m.statusMsg = "can't rename an exited session — resurrect it first (enter)"
+		m.loadEditBuffer()
 		return
 	}
-	if text == original {
-		if _, ok := m.edited[key]; ok {
-			delete(m.edited, key)
-			m.dirty = true
-		}
+
+	if err := core.RenameSession(session.Name, newName); err != nil {
+		m.statusMsg = err.Error()
+		m.loadEditBuffer()
 		return
 	}
-	if m.edited == nil {
-		m.edited = make(map[string]string)
+
+	m.migrateLocalMetadata(session.Name, newName)
+	m.refreshSessions()
+	m.selectedIndex = m.indexOfCommand(newName)
+	m.ensureVisible()
+	m.loadEditBuffer()
+}
+
+// refreshSessions re-fetches the live session list from zellij and rebuilds
+// the corpus, preserving the current query and filter.
+func (m *model) refreshSessions() {
+	sessions, err := core.ListSessions()
+	if err != nil {
+		m.statusMsg = err.Error()
+		return
 	}
-	if m.edited[key] != text {
-		m.edited[key] = text
-		m.dirty = true
-	}
+	m.sessions = sessions
+	m.indexSessions()
+	m.corpus = core.NewCorpus(m.sessionNames(), m.aliases)
+	m.refreshCommands()
 }
 
 func (m *model) refreshCommands() {
@@ -383,13 +415,10 @@ func (m *model) refreshCommands() {
 	m.commands = m.commands[:0]
 	var rest []string
 	for _, s := range scored {
-		key := core.NormalizeCommandKey(s.Command)
-		if _, ok := m.deleted[key]; ok {
-			continue
-		}
 		if m.aliasFilter && !m.isAliased(s.Command) {
 			continue
 		}
+		key := core.NormalizeCommandKey(s.Command)
 		if _, ok := m.pinned[key]; ok {
 			m.commands = append(m.commands, s.Command)
 			continue
@@ -409,45 +438,45 @@ func (m *model) refreshCommands() {
 	m.ensureVisible()
 }
 
-// isAliased reports whether a command carries a user-defined alias label.
-func (m model) isAliased(command string) bool {
-	return len(core.AliasesForCommand(command, m.aliases)) > 0
+// isAliased reports whether a session carries a user-defined alias label.
+func (m model) isAliased(name string) bool {
+	return len(core.AliasesForCommand(name, m.aliases)) > 0
 }
 
-// isPinned reports whether a command is a pinned favorite.
-func (m model) isPinned(command string) bool {
-	_, ok := m.pinned[core.NormalizeCommandKey(command)]
+// isPinned reports whether a session is a pinned favorite.
+func (m model) isPinned(name string) bool {
+	_, ok := m.pinned[core.NormalizeCommandKey(name)]
 	return ok
 }
 
-// togglePin pins or unpins the selected command, then rebuilds the list while
-// keeping the same command under the cursor as it floats to (or from) the top.
+// togglePin pins or unpins the selected session, then rebuilds the list while
+// keeping the same session under the cursor as it floats to (or from) the top.
 func (m *model) togglePin() {
 	if m.selectedIndex < 0 || m.selectedIndex >= len(m.commands) {
 		return
 	}
-	m.commitEdit()
-	command := m.commands[m.selectedIndex]
-	key := core.NormalizeCommandKey(command)
+	m.commitRename()
+	name := m.commands[m.selectedIndex]
+	key := core.NormalizeCommandKey(name)
 	if m.pinned == nil {
 		m.pinned = make(map[string]string)
 	}
 	if _, ok := m.pinned[key]; ok {
 		delete(m.pinned, key)
 	} else {
-		m.pinned[key] = command
+		m.pinned[key] = name
 	}
 	m.dirty = true
 
 	m.refreshCommands()
-	m.selectedIndex = m.indexOfCommand(command)
+	m.selectedIndex = m.indexOfCommand(name)
 	m.ensureVisible()
 	m.loadEditBuffer()
 }
 
-// indexOfCommand returns the row of a command by its normalized key, or 0.
-func (m model) indexOfCommand(command string) int {
-	key := core.NormalizeCommandKey(command)
+// indexOfCommand returns the row of a session by its normalized key, or 0.
+func (m model) indexOfCommand(name string) int {
+	key := core.NormalizeCommandKey(name)
 	for i, c := range m.commands {
 		if core.NormalizeCommandKey(c) == key {
 			return i
@@ -459,7 +488,7 @@ func (m model) indexOfCommand(command string) int {
 // toggleAliasFilter flips the aliased-only filter and rebuilds the result list.
 func (m *model) toggleAliasFilter() {
 	if m.focus == focusResults {
-		m.commitEdit()
+		m.commitRename()
 	}
 	m.aliasFilter = !m.aliasFilter
 	m.refreshCommands()
@@ -475,13 +504,15 @@ func (m model) firstCommand() string {
 	return m.commands[0]
 }
 
-func (m model) run(command string) (tea.Model, tea.Cmd) {
-	if strings.TrimSpace(command) == "" {
+// attachSelected quits the app and arms it to exec into `zellij attach`
+// (creating the session first when create is set).
+func (m model) attachSelected(name string, create bool) (tea.Model, tea.Cmd) {
+	if strings.TrimSpace(name) == "" {
 		return m, nil
 	}
-	// Running exits the app, so persist staged curation on the way out.
 	m.save()
-	m.executed = command
+	m.attachName = name
+	m.attachCreate = create
 	clearScreen()
 	return m, tea.Quit
 }
@@ -493,7 +524,7 @@ func (m model) quit() (tea.Model, tea.Cmd) {
 
 // requestQuit prompts before quitting when there are unsaved changes.
 func (m model) requestQuit() (tea.Model, tea.Cmd) {
-	m.commitEdit()
+	m.commitRename()
 	if m.dirty {
 		m.confirmQuit = true
 		m.showHelp = false

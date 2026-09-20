@@ -1,0 +1,542 @@
+package main
+
+import (
+	"fmt"
+	"memcommands/core"
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+)
+
+// Catppuccin Mocha palette.
+const (
+	colBase     = "#1E1E2E"
+	colSurface0 = "#313244"
+	colSurface1 = "#45475A"
+	colOverlay0 = "#6C7086"
+	colText     = "#CDD6F4"
+	colBlue     = "#89B4FA"
+	colGreen    = "#A6E3A1"
+	colMauve    = "#CBA6F7"
+	colPeach    = "#FAB387"
+	colYellow   = "#F9E2AF"
+	colRed      = "#F38BA8"
+)
+
+// hPad is the horizontal padding inside each bordered block.
+const hPad = 1
+
+type Styles struct {
+	FocusedBorder lipgloss.Color
+	BlurredBorder lipgloss.Color
+	block         lipgloss.Style
+	index         lipgloss.Style
+	selectedRow   lipgloss.Style
+	cursor        lipgloss.Style
+	cursorBar     lipgloss.Style
+	visual        lipgloss.Style
+	alias         lipgloss.Style
+	tag           lipgloss.Style
+	match         lipgloss.Style
+	hints         lipgloss.Style
+	modeSearch    lipgloss.Style
+	modeNormal    lipgloss.Style
+	modeInsert    lipgloss.Style
+	modeVisual    lipgloss.Style
+}
+
+func DefaultStyles() *Styles {
+	badge := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(colBase)).
+		Bold(true).
+		Padding(0, 1)
+
+	return &Styles{
+		FocusedBorder: lipgloss.Color(colBlue),
+		BlurredBorder: lipgloss.Color(colSurface1),
+		block: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			Padding(0, hPad),
+		index: lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0)),
+		selectedRow: lipgloss.NewStyle().
+			Background(lipgloss.Color(colSurface0)).
+			Foreground(lipgloss.Color(colText)).
+			Bold(true),
+		cursor:    lipgloss.NewStyle().Reverse(true),
+		cursorBar: lipgloss.NewStyle().Underline(true),
+		visual: lipgloss.NewStyle().
+			Background(lipgloss.Color(colBlue)).
+			Foreground(lipgloss.Color(colBase)),
+		alias:      lipgloss.NewStyle().Foreground(lipgloss.Color(colGreen)).Italic(true),
+		tag:        lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0)).Italic(true),
+		match:      lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach)).Bold(true),
+		hints:      lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0)),
+		modeSearch: badge.Background(lipgloss.Color(colBlue)),
+		modeNormal: badge.Background(lipgloss.Color(colGreen)),
+		modeInsert: badge.Background(lipgloss.Color(colMauve)),
+		modeVisual: badge.Background(lipgloss.Color(colBlue)),
+	}
+}
+
+func (m model) View() string {
+	contentWidth := m.contentWidth()
+	innerWidth := m.innerWidth()
+
+	searchBorder := m.styles.BlurredBorder
+	resultsBorder := m.styles.BlurredBorder
+	if m.focus == focusSearch {
+		searchBorder = m.styles.FocusedBorder
+	} else {
+		resultsBorder = m.styles.FocusedBorder
+	}
+
+	searchContent := m.userInput.View()
+	if m.focus != focusSearch {
+		hint := m.styles.index.Render("(press 'ESC' to focus)")
+		gap := innerWidth - ansi.StringWidth(searchContent) - ansi.StringWidth(hint)
+		if gap >= 1 {
+			// Right-align the hint on the same line as the input.
+			searchContent += strings.Repeat(" ", gap) + hint
+		} else {
+			// Too narrow to right-align; keep both on one line with a space.
+			searchContent = ansi.Truncate(searchContent+" "+hint, innerWidth, "")
+		}
+	}
+
+	searchBlock := m.styles.block.
+		BorderForeground(searchBorder).
+		Width(contentWidth).
+		Render(searchContent)
+
+	body := m.renderIndexedCommands(innerWidth)
+	if m.showHelp {
+		body = m.helpView(innerWidth)
+	}
+	if m.confirmQuit {
+		body = m.confirmQuitView(innerWidth)
+	}
+	if m.confirm != confirmNone {
+		body = m.confirmActionView(innerWidth)
+	}
+
+	resultsBlock := m.styles.block.
+		BorderForeground(resultsBorder).
+		Width(contentWidth).
+		Render(body)
+
+	return lipgloss.JoinVertical(
+		lipgloss.Left,
+		searchBlock,
+		resultsBlock,
+		m.statusBar(),
+	)
+}
+
+func (m model) renderIndexedCommands(width int) string {
+	if len(m.commands) == 0 {
+		msg := "  no matching sessions"
+		if strings.TrimSpace(m.userInput.Value()) != "" {
+			msg = "  no matching sessions — :new to create one"
+		}
+		return m.styles.index.Render(msg)
+	}
+
+	query := m.userInput.Value()
+
+	start := m.scrollOffset
+	end := min(start+maxResults, len(m.commands))
+	lines := make([]string, 0, end-start)
+
+	for i := start; i < end; i++ {
+		selected := i == m.selectedIndex
+		editing := selected && m.focus == focusResults
+
+		if selected {
+			lines = append(lines, m.renderSelectedRow(i, query, editing, width))
+			continue
+		}
+
+		name := m.commands[i]
+		text := highlightMatch(name, core.MatchPositions(query, name), lipgloss.NewStyle(), m.styles.match)
+		line := m.styles.index.Render(fmt.Sprintf("  %2d ", i+1)) + m.pinMarker(name, lipgloss.NewStyle()) + m.aliasPrefix(name) + text + m.statusTag(name, lipgloss.NewStyle())
+		if width > 0 {
+			line = ansi.Truncate(line, width, "…")
+		}
+		lines = append(lines, line)
+	}
+	return strings.Join(lines, "\n")
+}
+
+// helpView renders the keybindings cheat-sheet shown while showHelp is set.
+func (m model) helpView(width int) string {
+	type binding struct{ keys, desc string }
+	type section struct {
+		title    string
+		bindings []binding
+	}
+
+	sections := []section{
+		{"Navigate", []binding{
+			{"j / k", "move down / up (or ↓ / ↑)"},
+			{"ctrl+d / ctrl+u", "half page down / up"},
+			{"gg / G", "jump to top / bottom"},
+			{"{n}G", "jump to line n"},
+		}},
+		{"Sessions", []binding{
+			{"enter", "attach — resurrects an exited session"},
+			{":new <name>", "create a session (blank name uses the search text)"},
+			{"i / a / cc / S …", "rename (vim motions); commits on move/enter"},
+			{"dd / 5dd", "delete session(s) — force-removes them, with confirmation"},
+			{"K / 5K", "kill session(s) (end the process only), with confirmation"},
+			{"m", "add a local search alias / jump into its [brackets]"},
+			{"*", "pin / unpin (favorites float to the top)"},
+			{"ctrl+a", "toggle aliased-only view"},
+		}},
+		{"Edit the name buffer", []binding{
+			{"i / a", "insert before / after cursor"},
+			{"I / A", "insert at start / end"},
+			{"h / l", "move cursor left / right (or ← / →)"},
+			{"0 / ^ / $", "cursor to start / first non-blank / end"},
+			{"w / b / e", "next / prev / end of word (W B E too)"},
+			{"ge / gE", "back to end of previous word"},
+			{"f / t + char", "find / till char (; , repeat)"},
+			{"x / X", "delete char at / before cursor"},
+			{"r / ~", "replace char / toggle case"},
+			{"s / S", "substitute char / line"},
+			{"D / C", "delete / change to end of line"},
+			{"d / c / y + motion", "delete / change / yank (df, dt, d^ …)"},
+			{"v / V", "visual select / whole line"},
+			{"p / P", "paste after / before"},
+		}},
+		{"Save & quit", []binding{
+			{":w / :wq", "save alias/pin changes / save and quit"},
+			{":q / :q!", "quit / discard and quit"},
+			{"esc", "back to search"},
+		}},
+		{"Other", []binding{
+			{"?", "toggle this help"},
+			{"ctrl+c", "quit"},
+		}},
+	}
+
+	header := m.styles.match.Render("Keybindings")
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colBlue)).Bold(true)
+	titleStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colMauve)).Bold(true)
+
+	// Align descriptions to the widest key column.
+	keyCol := 0
+	for _, s := range sections {
+		for _, b := range s.bindings {
+			if len(b.keys) > keyCol {
+				keyCol = len(b.keys)
+			}
+		}
+	}
+
+	lines := []string{header, ""}
+	for _, s := range sections {
+		lines = append(lines, titleStyle.Render(s.title))
+		for _, b := range s.bindings {
+			keys := keyStyle.Render(b.keys) + strings.Repeat(" ", keyCol-len(b.keys))
+			line := "  " + keys + "  " + m.styles.hints.Render(b.desc)
+			if width > 0 {
+				line = ansi.Truncate(line, width, "…")
+			}
+			lines = append(lines, line)
+		}
+		lines = append(lines, "")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m model) confirmQuitView(width int) string {
+	title := lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach)).Bold(true).Render("⚠  Unsaved changes")
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colBlue)).Bold(true)
+	opt := func(key, desc string) string {
+		return "  " + keyStyle.Render(key) + "  " + m.styles.hints.Render(desc)
+	}
+
+	lines := []string{
+		title,
+		"",
+		m.styles.hints.Render("You have alias/pin changes that haven't been saved."),
+		"",
+		opt("s / enter", "save and exit"),
+		opt("d", "exit without saving"),
+		opt("esc", "return"),
+	}
+	for i, line := range lines {
+		if width > 0 {
+			lines[i] = ansi.Truncate(line, width, "…")
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// confirmActionView renders the kill/delete confirmation overlay.
+func (m model) confirmActionView(width int) string {
+	verb := "Kill"
+	explanation := "Ends the process(es). May or may not stay resurrectable (depends on zellij's session_serialization setting)."
+	if m.confirm == confirmDelete {
+		verb = "Delete"
+		explanation = "Permanently removes the session(s), killing them first if still running. Cannot be undone."
+	}
+
+	title := lipgloss.NewStyle().Foreground(lipgloss.Color(colRed)).Bold(true).Render(fmt.Sprintf("⚠  %s session", verb))
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colBlue)).Bold(true)
+	nameStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colYellow)).Bold(true)
+	opt := func(key, desc string) string {
+		return "  " + keyStyle.Render(key) + "  " + m.styles.hints.Render(desc)
+	}
+
+	lines := []string{title, ""}
+	for _, name := range m.confirmTargets {
+		suffix := ""
+		if s, ok := m.byName[name]; ok && s.Current {
+			suffix = m.styles.hints.Render("  (this is your current session)")
+		}
+		lines = append(lines, "  "+nameStyle.Render(name)+suffix)
+	}
+	lines = append(lines,
+		"",
+		m.styles.hints.Render(explanation),
+		"",
+		opt("y / enter", "confirm"),
+		opt("n / esc", "cancel"),
+	)
+	for i, line := range lines {
+		if width > 0 {
+			lines[i] = ansi.Truncate(line, width, "…")
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m model) renderSelectedRow(i int, query string, editing bool, width int) string {
+	base := m.styles.selectedRow
+
+	var body string
+	if editing {
+		// renderEditLine draws the alias [brackets] itself, so no tag prefix.
+		body = m.renderEditLine(base)
+	} else {
+		name := m.commands[i]
+		content := highlightMatch(name, core.MatchPositions(query, name), base, base.Foreground(lipgloss.Color(colPeach)))
+		tagBase := base.Italic(true).Foreground(lipgloss.Color(colGreen))
+		if tags := m.renderAliasTags(name, tagBase, tagBase.Foreground(lipgloss.Color(colPeach))); tags != "" {
+			body = tags + base.Render(" ") + content
+		} else {
+			body = content
+		}
+		body += m.statusTag(name, base)
+	}
+
+	row := base.Render(fmt.Sprintf("❯ %2d ", i+1)) + m.pinMarker(m.commands[i], base) + body
+	if width > 0 {
+		row = ansi.Truncate(row, width, "…")
+		if pad := width - ansi.StringWidth(row); pad > 0 {
+			row += base.Render(strings.Repeat(" ", pad))
+		}
+	}
+	return row
+}
+
+// pinMarker renders a fixed-width gutter column: a star for pinned sessions, or
+// blank padding otherwise, so pinned and unpinned rows stay aligned.
+func (m model) pinMarker(name string, base lipgloss.Style) string {
+	if m.isPinned(name) {
+		return base.Foreground(lipgloss.Color(colYellow)).Render("★ ")
+	}
+	return base.Render("  ")
+}
+
+// statusTag renders a small muted chip for an exited or current session.
+func (m model) statusTag(name string, base lipgloss.Style) string {
+	s, ok := m.byName[name]
+	if !ok {
+		return ""
+	}
+	tag := base.Foreground(lipgloss.Color(colOverlay0)).Italic(true)
+	switch {
+	case s.Exited:
+		return " " + tag.Render("[exited]")
+	case s.Current:
+		return " " + tag.Foreground(lipgloss.Color(colGreen)).Render("(you)")
+	}
+	return ""
+}
+
+func (m model) aliasPrefix(name string) string {
+	tags := m.renderAliasTags(name, m.styles.alias, m.styles.alias.Foreground(lipgloss.Color(colPeach)))
+	if tags == "" {
+		return ""
+	}
+	return tags + " "
+}
+
+// renderAliasTags renders a session's alias labels as [tag] chips, highlighting
+// the characters that match the current query the same way result rows do.
+func (m model) renderAliasTags(name string, base, match lipgloss.Style) string {
+	labels := core.AliasesForCommand(name, m.aliases)
+	if len(labels) == 0 {
+		return ""
+	}
+
+	query := m.userInput.Value()
+	tags := make([]string, len(labels))
+	for i, label := range labels {
+		inner := highlightMatch(label, core.MatchPositions(query, label), base, match)
+		tags[i] = base.Render("[") + inner + base.Render("]")
+	}
+	return strings.Join(tags, base.Render(" "))
+}
+
+func highlightMatch(text string, positions []int, base, match lipgloss.Style) string {
+	if len(positions) == 0 {
+		return base.Render(text)
+	}
+
+	set := make(map[int]struct{}, len(positions))
+	for _, p := range positions {
+		set[p] = struct{}{}
+	}
+
+	var b strings.Builder
+	for i, r := range text {
+		if _, ok := set[i]; ok {
+			b.WriteString(match.Render(string(r)))
+		} else {
+			b.WriteString(base.Render(string(r)))
+		}
+	}
+	return b.String()
+}
+
+// showAliasBrackets reports whether to draw the [alias] region: an alias exists, or one is being typed.
+func (m model) showAliasBrackets() bool {
+	return m.aliasLen > 0 || (m.mode == modeInsert && m.editAlias)
+}
+
+// renderEditLine draws the buffer as [alias] name; the brackets and gap are decoration, not buffer indices.
+func (m model) renderEditLine(base lipgloss.Style) string {
+	showBr := m.showAliasBrackets()
+	creatingEmpty := showBr && m.aliasLen == 0
+	aliasStyle := base.Italic(true).Foreground(lipgloss.Color(colGreen))
+
+	cursor := base.Reverse(true)
+	if m.mode == modeInsert {
+		cursor = base.Underline(true)
+	}
+	visual := base.Background(lipgloss.Color(colBlue)).Foreground(lipgloss.Color(colBase))
+	yankFlash := base.Background(lipgloss.Color(colYellow)).Foreground(lipgloss.Color(colBase))
+	var vs, ve int
+	if m.mode == modeVisual {
+		vs, ve = m.visualRange()
+	}
+
+	render := func(i int, r rune) string {
+		st := base
+		if i < m.aliasLen {
+			st = aliasStyle
+		}
+		switch {
+		case m.mode == modeVisual && i >= vs && i < ve:
+			return visual.Render(string(r))
+		case !creatingEmpty && m.mode != modeVisual && i == m.cursor:
+			return cursor.Render(string(r))
+		case m.yankActive && i >= m.yankStart && i < m.yankEnd:
+			return yankFlash.Render(string(r))
+		}
+		return st.Render(string(r))
+	}
+
+	bracketClose := aliasStyle.Render("]") + base.Render(" ")
+
+	var b strings.Builder
+	if showBr {
+		b.WriteString(aliasStyle.Render("["))
+		if creatingEmpty {
+			b.WriteString(cursor.Render(" "))
+			b.WriteString(bracketClose)
+		}
+	}
+	for i, r := range m.editBuffer {
+		if showBr && m.aliasLen > 0 && i == m.aliasLen {
+			b.WriteString(bracketClose)
+		}
+		b.WriteString(render(i, r))
+	}
+	if showBr && m.aliasLen > 0 && m.aliasLen >= len(m.editBuffer) {
+		b.WriteString(bracketClose) // all-alias buffer: close after the last char
+	}
+	if !creatingEmpty && m.mode != modeVisual && m.cursor >= len(m.editBuffer) {
+		b.WriteString(cursor.Render(" "))
+	}
+	return b.String()
+}
+
+func (m model) statusBar() string {
+	if m.confirmQuit {
+		badge := m.styles.modeNormal.Background(lipgloss.Color(colRed)).Render("CONFIRM")
+		hints := m.styles.hints.Render("s save & exit · d exit anyway · esc return")
+		return ansi.Truncate(badge+" "+hints, m.width, "…")
+	}
+
+	if m.confirm != confirmNone {
+		badge := m.styles.modeNormal.Background(lipgloss.Color(colRed)).Render("CONFIRM")
+		hints := m.styles.hints.Render("y confirm · n cancel")
+		return ansi.Truncate(badge+" "+hints, m.width, "…")
+	}
+
+	// The ":" command line takes over the status bar while typing.
+	if m.commandMode {
+		badge := m.styles.modeNormal.Render("COMMAND")
+		line := m.styles.cursorBar.Render(":" + m.commandLine + " ")
+		return ansi.Truncate(badge+" "+line, m.width, "…")
+	}
+
+	if m.showHelp {
+		badge := m.styles.modeNormal.Render("HELP")
+		hints := m.styles.hints.Render("press any key to close")
+		return ansi.Truncate(badge+" "+hints, m.width, "…")
+	}
+
+	var badge, hints string
+	switch {
+	case m.focus == focusSearch:
+		badge = m.styles.modeSearch.Render("SEARCH")
+		hints = "enter attach · ? help"
+	case m.mode == modeInsert:
+		badge = m.styles.modeInsert.Render("INSERT")
+		hints = "esc normal · ? help"
+	case m.mode == modeVisual:
+		badge = m.styles.modeVisual.Render("VISUAL")
+		hints = "esc cancel · ? help"
+	default:
+		badge = m.styles.modeNormal.Render("NORMAL")
+		if s, ok := m.selectedSession(); ok && s.Exited {
+			hints = "enter resurrect · dd delete · esc search · ? help"
+		} else {
+			hints = "enter attach · dd delete · K kill · esc search · ? help"
+		}
+	}
+
+	// A transient message or unsaved marker replaces the hints when present.
+	switch {
+	case m.statusMsg != "":
+		hints = m.statusMsg
+	case m.dirty:
+		hints = "[+] unsaved · " + hints
+	}
+	if m.aliasFilter {
+		hints = "[aliased] · " + hints
+	}
+	// Flag when the cursor sits in the protected alias region.
+	if m.focus == focusResults && m.statusMsg == "" && (m.cursor < m.aliasLen || (m.showAliasBrackets() && m.aliasLen == 0)) {
+		hints = "editing alias · " + hints
+	}
+
+	bar := badge + " " + m.styles.hints.Render(hints)
+	return ansi.Truncate(bar, m.width, "…")
+}

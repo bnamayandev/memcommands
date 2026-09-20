@@ -215,11 +215,11 @@ func TestUserAliasRoundTrip(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
 	in := map[string]string{"gcm": `git commit -m "wip"`}
-	if err := SaveUserAliases(in); err != nil {
+	if err := SaveUserAliases("memcommands", in); err != nil {
 		t.Fatalf("save failed: %v", err)
 	}
 
-	out := LoadUserAliases()
+	out := LoadUserAliases("memcommands")
 	if out["gcm"] != in["gcm"] {
 		t.Fatalf("round trip mismatch: got %q", out["gcm"])
 	}
@@ -234,11 +234,11 @@ func TestPinnedRoundTrip(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", dir)
 
 	in := []string{"git status", "go build ./..."}
-	if err := SavePinnedCommands(in); err != nil {
+	if err := SavePinnedCommands("memcommands", in); err != nil {
 		t.Fatalf("save failed: %v", err)
 	}
 
-	out := LoadPinnedCommands()
+	out := LoadPinnedCommands("memcommands")
 	if len(out) != len(in) || out[0] != in[0] || out[1] != in[1] {
 		t.Fatalf("round trip mismatch: got %v", out)
 	}

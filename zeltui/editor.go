@@ -39,6 +39,18 @@ func (m *model) startYank(start, end int) tea.Cmd {
 	})
 }
 
+// attachEditedSelection commits any pending rename edit before attaching, so
+// Enter mid-edit attaches to the session's now-current name rather than to
+// whatever uncommitted text happens to be sitting in the buffer.
+func (m model) attachEditedSelection() (tea.Model, tea.Cmd) {
+	m.commitRename()
+	session, ok := m.selectedSession()
+	if !ok {
+		return m, nil
+	}
+	return m.attachSelected(session.Name, false)
+}
+
 func (m model) updateResults(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+c" {
 		return m.requestQuit()
@@ -126,7 +138,7 @@ func (m model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeNormal
 		m.clampCursor()
 	case "enter":
-		return m.run(m.commandText())
+		return m.attachEditedSelection()
 	case "h", "left":
 		m.cursor -= count
 		m.clampCursor()
@@ -209,39 +221,39 @@ func (m model) updateVisual(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // commitAlias stages the alias region: unchanged is a no-op, blank clears the tag, a clash is rejected.
-func (m *model) commitAlias(command string) {
+func (m *model) commitAlias(name string) {
 	alias := strings.TrimSpace(string(m.editBuffer[:m.aliasLen]))
 
 	existing := ""
-	if labels := core.AliasesForCommand(command, m.aliases); len(labels) > 0 {
+	if labels := core.AliasesForCommand(name, m.aliases); len(labels) > 0 {
 		existing = labels[0]
 	}
 	if alias == existing {
 		return
 	}
 
-	target := strings.Join(strings.Fields(strings.TrimSpace(command)), " ")
+	target := strings.TrimSpace(name)
 	if target == "" {
 		return
 	}
 
 	if alias == "" {
-		if m.clearAliasFor(command) {
+		if m.clearAliasFor(name) {
 			m.dirty = true
 			m.rebuildAliasIndex()
 		}
 		return
 	}
 
-	// Reject a label already bound to a different command.
+	// Reject a label already bound to a different session.
 	if bound, ok := m.userAliases[alias]; ok &&
 		core.NormalizeCommandKey(bound) != core.NormalizeCommandKey(target) {
 		m.statusMsg = fmt.Sprintf("alias %q already in use", alias)
 		return
 	}
 
-	// One alias per command: drop the old label before binding the new one.
-	m.clearAliasFor(command)
+	// One alias per session: drop the old label before binding the new one.
+	m.clearAliasFor(name)
 	if m.userAliases == nil {
 		m.userAliases = make(map[string]string)
 	}
@@ -250,10 +262,10 @@ func (m *model) commitAlias(command string) {
 	m.rebuildAliasIndex()
 }
 
-// clearAliasFor drops any alias pointing at command, reporting if one was removed.
-func (m *model) clearAliasFor(command string) bool {
+// clearAliasFor drops any alias pointing at name, reporting if one was removed.
+func (m *model) clearAliasFor(name string) bool {
 	removed := false
-	for _, label := range core.AliasesForCommand(command, m.aliases) {
+	for _, label := range core.AliasesForCommand(name, m.aliases) {
 		delete(m.userAliases, label)
 		removed = true
 	}
@@ -263,8 +275,30 @@ func (m *model) clearAliasFor(command string) bool {
 // rebuildAliasIndex re-derives the alias index and result list from userAliases.
 func (m *model) rebuildAliasIndex() {
 	m.aliases.ByFullCommand = core.BuildUserAliasIndex(m.userAliases)
-	m.corpus = core.NewCorpus(m.history, m.aliases)
+	m.corpus = core.NewCorpus(m.sessionNames(), m.aliases)
 	m.refreshCommands()
+}
+
+// migrateLocalMetadata carries a session's local alias/pin over to its new
+// name after a successful rename, so they don't silently orphan on the old,
+// now-nonexistent name.
+func (m *model) migrateLocalMetadata(oldName, newName string) {
+	changed := false
+	for _, alias := range core.AliasesForCommand(oldName, m.aliases) {
+		m.userAliases[alias] = newName
+		changed = true
+	}
+	if changed {
+		m.dirty = true
+		m.rebuildAliasIndex()
+	}
+
+	oldKey := core.NormalizeCommandKey(oldName)
+	if _, ok := m.pinned[oldKey]; ok {
+		delete(m.pinned, oldKey)
+		m.pinned[core.NormalizeCommandKey(newName)] = newName
+		m.dirty = true
+	}
 }
 
 // updateCommand drives the ":" line: enter executes, esc/backspace-past-start
@@ -304,7 +338,10 @@ func (m model) runExCommand() (tea.Model, tea.Cmd) {
 	m.commandMode = false
 	m.commandLine = ""
 
-	switch cmd {
+	verb, arg, _ := strings.Cut(cmd, " ")
+	arg = strings.TrimSpace(arg)
+
+	switch verb {
 	case "w":
 		m.save()
 		m.statusMsg = "written"
@@ -320,22 +357,97 @@ func (m model) runExCommand() (tea.Model, tea.Cmd) {
 		return m.quit()
 	case "q!":
 		return m.quit()
+	case "new", "n":
+		name := arg
+		if name == "" {
+			name = strings.TrimSpace(m.userInput.Value())
+		}
+		if name == "" {
+			m.statusMsg = "usage: :new <name>"
+			return m, nil
+		}
+		return m.attachSelected(name, true)
+	case "delete", "d":
+		return m.armDelete(1)
+	case "kill", "k":
+		return m.armKill(1)
 	default:
 		m.statusMsg = fmt.Sprintf("not a command: :%s", cmd)
 		return m, nil
 	}
 }
 
+// armDelete arms the confirm overlay to permanently delete count sessions
+// starting at the selection, like vim's `5dd`. Unlike kill, delete applies
+// regardless of whether a session is running or already exited — it force-
+// removes it either way, so there's no filtering here.
+func (m model) armDelete(count int) (model, tea.Cmd) {
+	if m.selectedIndex < 0 || m.selectedIndex >= len(m.commands) {
+		return m, nil
+	}
+	if count < 1 {
+		count = 1
+	}
+	end := m.selectedIndex + count
+	if end > len(m.commands) {
+		end = len(m.commands)
+	}
+
+	targets := append([]string(nil), m.commands[m.selectedIndex:end]...)
+	if len(targets) == 0 {
+		return m, nil
+	}
+
+	m.confirm = confirmDelete
+	m.confirmTargets = targets
+	return m, nil
+}
+
+// updateConfirm drives the kill/delete confirmation overlay.
+func (m model) updateConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "enter":
+		return m.runConfirmedAction()
+	case "n", "esc", "ctrl+c":
+		m.confirm = confirmNone
+		m.confirmTargets = nil
+	}
+	return m, nil
+}
+
+func (m model) runConfirmedAction() (tea.Model, tea.Cmd) {
+	kind := m.confirm
+	targets := m.confirmTargets
+	m.confirm = confirmNone
+	m.confirmTargets = nil
+
+	for _, name := range targets {
+		var err error
+		switch kind {
+		case confirmKill:
+			err = core.KillSession(name)
+		case confirmDelete:
+			err = core.DeleteSession(name)
+		}
+		if err != nil {
+			m.statusMsg = err.Error()
+		}
+	}
+
+	m.refreshSessions()
+	m.ensureVisible()
+	m.loadEditBuffer()
+	return m, nil
+}
+
 // save flushes staged edits, deletions, and aliases to disk.
 func (m *model) save() {
-	m.commitEdit()
+	m.commitRename()
 	if !m.dirty {
 		return
 	}
-	m.persistDeleted()
 	m.persistPinned()
-	_ = core.SaveEditedCommands(m.edited)
-	_ = core.SaveUserAliases("memcommands", m.userAliases)
+	_ = core.SaveUserAliases(appName, m.userAliases)
 	m.dirty = false
 }
 
@@ -346,7 +458,7 @@ func (m model) updateInsert(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cursor--
 		m.clampCursor()
 	case tea.KeyEnter:
-		return m.run(m.commandText())
+		return m.attachEditedSelection()
 	case tea.KeyBackspace:
 		if m.cursor > 0 {
 			m.deleteBuffer(m.cursor-1, m.cursor)
@@ -446,7 +558,7 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.setSelection(target)
 	case "enter":
-		return m.run(m.commandText())
+		return m.attachEditedSelection()
 	case "j", "ctrl+j", "ctrl+n", "down":
 		m.setSelection(m.selectedIndex + count)
 	case "k", "ctrl+k", "ctrl+p", "up":
@@ -474,14 +586,14 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 	case ":":
-		m.commitEdit() // stage any pending edit so :w/:q see it
+		m.commitRename() // stage any pending alias/rename so :w/:q see it
 		m.commandMode = true
 		m.commandLine = ""
 		m.statusMsg = ""
-	case "u":
-		m.undoDelete()
 	case "*":
 		m.togglePin()
+	case "K":
+		return m.armKill(count)
 	default:
 		return m, m.editMotion(key, count)
 	}
@@ -489,7 +601,7 @@ func (m model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 // editMotion applies the normal-mode keys that edit the buffer, shared by the
-// command and alias editors. It returns a command only when the key needs one
+// name and alias editors. It returns a command only when the key needs one
 // (currently just the yank-highlight flash timer).
 func (m *model) editMotion(key string, count int) tea.Cmd {
 	switch key {
@@ -631,12 +743,12 @@ func (m *model) editMotion(key string, count int) tea.Cmd {
 }
 
 // setSelection moves the highlighted row to i (clamped), keeps it visible, and
-// reloads the edit buffer for the new command.
+// reloads the edit buffer for the new session.
 func (m *model) setSelection(i int) {
 	if len(m.commands) == 0 {
 		return
 	}
-	m.commitEdit()
+	m.commitRename()
 	m.selectedIndex = max(0, min(i, len(m.commands)-1))
 	m.ensureVisible()
 	m.loadEditBuffer()
@@ -681,8 +793,7 @@ func (m model) applyOperator(key string) (model, tea.Cmd) {
 		m.pending = ""
 		m.pendingCount = 0
 		if op == "d" {
-			m.deleteSelected(count)
-			return m, nil
+			return m.armDelete(count)
 		}
 		return m.applyOpRange(op, 0, len(m.editBuffer))
 	}
@@ -985,12 +1096,14 @@ func reverseFind(cmd string) string {
 	return ""
 }
 
-// deleteSelected removes count commands starting at the selection, like vim's
-// `5dd`; the whole group undoes as a single `u`. count is clamped to the
-// commands remaining from the selection down.
-func (m *model) deleteSelected(count int) {
+// armKill arms the confirm overlay to kill (end the process of, without
+// necessarily removing it — see core.KillSession) count sessions starting at
+// the selection, bound to `K`/`{n}K`. Already-exited sessions are skipped
+// (nothing live to kill); if that leaves nothing, it's a no-op with a status
+// message.
+func (m model) armKill(count int) (model, tea.Cmd) {
 	if m.selectedIndex < 0 || m.selectedIndex >= len(m.commands) {
-		return
+		return m, nil
 	}
 	if count < 1 {
 		count = 1
@@ -1000,51 +1113,28 @@ func (m *model) deleteSelected(count int) {
 		end = len(m.commands)
 	}
 
-	if m.deleted == nil {
-		m.deleted = make(map[string]string)
+	var targets []string
+	for _, name := range m.commands[m.selectedIndex:end] {
+		if s, ok := m.byName[name]; ok && !s.Exited {
+			targets = append(targets, name)
+		}
 	}
-	keys := make([]string, 0, end-m.selectedIndex)
-	for _, cmd := range m.commands[m.selectedIndex:end] {
-		key := core.NormalizeCommandKey(cmd)
-		m.deleted[key] = cmd
-		keys = append(keys, key)
+	if len(targets) == 0 {
+		m.statusMsg = "nothing to kill — already exited"
+		return m, nil
 	}
-	m.undoStack = append(m.undoStack, keys)
-	m.dirty = true
 
-	m.refreshCommands()
-	m.loadEditBuffer()
-}
-
-func (m *model) undoDelete() {
-	if len(m.undoStack) == 0 {
-		return
-	}
-	keys := m.undoStack[len(m.undoStack)-1]
-	m.undoStack = m.undoStack[:len(m.undoStack)-1]
-	for _, key := range keys {
-		delete(m.deleted, key)
-	}
-	m.dirty = true
-
-	m.refreshCommands()
-	m.loadEditBuffer()
-}
-
-func (m *model) persistDeleted() {
-	commands := make([]string, 0, len(m.deleted))
-	for _, cmd := range m.deleted {
-		commands = append(commands, cmd)
-	}
-	_ = core.SaveDeletedCommands(commands)
+	m.confirm = confirmKill
+	m.confirmTargets = targets
+	return m, nil
 }
 
 func (m *model) persistPinned() {
 	commands := make([]string, 0, len(m.pinned))
-	for _, cmd := range m.pinned {
-		commands = append(commands, cmd)
+	for _, name := range m.pinned {
+		commands = append(commands, name)
 	}
-	_ = core.SavePinnedCommands("memcommands", commands)
+	_ = core.SavePinnedCommands(appName, commands)
 }
 
 // growsAlias reports whether an insert at p extends the alias; at the boundary it follows editAlias.
@@ -1136,7 +1226,7 @@ func isSpace(r rune) bool {
 }
 
 // Word motions pass the alias boundary so it acts as a word break (alias and
-// command never merge into one word) while still moving freely across it.
+// name never merge into one word) while still moving freely across it.
 func (m model) nextWordStartIn(i int) int { return nextWordStart(m.editBuffer, i, m.aliasLen) }
 func (m model) prevWordStartIn(i int) int { return prevWordStart(m.editBuffer, i, m.aliasLen) }
 func (m model) wordEndIn(i int) int       { return wordEnd(m.editBuffer, i, m.aliasLen) }

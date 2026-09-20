@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
-# Build memcommands and bind Ctrl-R to it for the current shell on macOS,
-# Linux, or Windows (via WSL or Git Bash).
+# Build memcommands and zelcommands and wire up their shortcuts for the
+# current shell on macOS, Linux, or Windows (via WSL or Git Bash):
+# memcommands binds Ctrl-R, zelcommands runs whenever you type `zl`.
 set -euo pipefail
 
 INSTALL_DIR="$HOME/.local/bin"
-MARKER="# >>> memcommands (Ctrl-R) >>>"
+MEM_MARKER="# >>> memcommands (Ctrl-R) >>>"
+MEM_END_MARKER="# <<< memcommands (Ctrl-R) <<<"
+ZEL_MARKER="# >>> zelcommands (zl) >>>"
+ZEL_END_MARKER="# <<< zelcommands (zl) <<<"
 REPO_URL="https://github.com/bnamayandev/memcommands.git"
 
 # Colors, but only when writing to a real terminal and NO_COLOR is unset.
@@ -19,7 +23,7 @@ fi
 # Step-based progress bar. Redraws on a single line via \r so it fills in place
 # rather than stacking; the bar is neutral (green is reserved for success).
 STEP=0
-TOTAL_STEPS=4
+TOTAL_STEPS=6
 progress() {
   STEP=$((STEP + 1))
   local width=24 filled empty i bar=''
@@ -51,7 +55,7 @@ case "$(uname -s)" in
 esac
 echo "Detected OS: $OS"
 
-command -v go >/dev/null 2>&1 || { echo "Go is required to build memcommands. Install Go and retry." >&2; exit 1; }
+command -v go >/dev/null 2>&1 || { echo "Go is required to build memcommands and zelcommands. Install Go and retry." >&2; exit 1; }
 
 # Locate the repo root. When run from a checkout, it's the parent of scripts/;
 # when piped from curl there's no checkout, so clone into a cache dir first.
@@ -72,24 +76,36 @@ else
   fi
 fi
 
-# Build the binary, naming it 'memcommands' so it filters its own invocations.
+# Build both binaries, naming memcommands so it filters its own invocations.
 # (Windows needs the .exe suffix; PATH lookup from bash/PowerShell/cmd all
-# append it automatically when you just type "memcommands".)
+# append it automatically when you just type the bare name.)
 BIN_NAME="memcommands"
-[ "$OS" = "windows" ] && BIN_NAME="memcommands.exe"
+ZEL_BIN_NAME="zelcommands"
+if [ "$OS" = "windows" ]; then
+  BIN_NAME="memcommands.exe"
+  ZEL_BIN_NAME="zelcommands.exe"
+fi
+
 progress "Building memcommands..."
 ( cd "$REPO_ROOT" && go build -ldflags="-s -w" -o "bin/$BIN_NAME" ./tui )
+
+progress "Building zelcommands..."
+( cd "$REPO_ROOT" && go build -ldflags="-s -w" -o "bin/$ZEL_BIN_NAME" ./zeltui )
 
 mkdir -p "$INSTALL_DIR"
 if [ "$OS" = "windows" ]; then
   # Symlinks need admin rights or Developer Mode on Windows, so copy instead;
-  # re-run this script after pulling updates to refresh the installed copy.
+  # re-run this script after pulling updates to refresh the installed copies.
   cp -f "$REPO_ROOT/bin/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
   progress "Copied $INSTALL_DIR/$BIN_NAME"
+  cp -f "$REPO_ROOT/bin/$ZEL_BIN_NAME" "$INSTALL_DIR/$ZEL_BIN_NAME"
+  progress "Copied $INSTALL_DIR/$ZEL_BIN_NAME"
 else
-  # Put it on PATH via a symlink so future rebuilds are picked up automatically.
+  # Put them on PATH via symlinks so future rebuilds are picked up automatically.
   ln -sf "$REPO_ROOT/bin/$BIN_NAME" "$INSTALL_DIR/$BIN_NAME"
   progress "Linked $INSTALL_DIR/$BIN_NAME -> $REPO_ROOT/bin/$BIN_NAME"
+  ln -sf "$REPO_ROOT/bin/$ZEL_BIN_NAME" "$INSTALL_DIR/$ZEL_BIN_NAME"
+  progress "Linked $INSTALL_DIR/$ZEL_BIN_NAME -> $REPO_ROOT/bin/$ZEL_BIN_NAME"
 fi
 
 # Pick the shell and its rc file (macOS bash and Git Bash both launch as login
@@ -99,23 +115,33 @@ case "$SHELL_NAME" in
   zsh)  RC="$HOME/.zshrc" ;;
   bash) if [ "$OS" = "mac" ] || [ "$OS" = "windows" ]; then RC="$HOME/.bash_profile"; else RC="$HOME/.bashrc"; fi ;;
   fish) RC="$HOME/.config/fish/config.fish"; mkdir -p "$(dirname "$RC")" ;;
-  *) printf '\nUnrecognized shell '\''%s'\''. Binary is installed; add a Ctrl-R binding manually.\n' "${SHELL_NAME:-unknown}" >&2; exit 0 ;;
+  *) printf '\nUnrecognized shell '\''%s'\''. Binaries are installed; add the Ctrl-R binding and a `zl` command manually.\n' "${SHELL_NAME:-unknown}" >&2; exit 0 ;;
 esac
 
 touch "$RC"
 
-# Strip any prior snippet so re-runs refresh an outdated widget in place.
-END_MARKER="# <<< memcommands (Ctrl-R) <<<"
-if grep -qF "$MARKER" "$RC"; then
-  TMP="$(mktemp)"
-  awk -v s="$MARKER" -v e="$END_MARKER" '
+# Strip a prior snippet (by its marker pair) so a re-run refreshes an outdated
+# widget in place, reporting whether it found one to strip.
+strip_block() {
+  local start="$1" end="$2"
+  if ! grep -qF "$start" "$RC"; then
+    return 1
+  fi
+  local tmp
+  tmp="$(mktemp)"
+  awk -v s="$start" -v e="$end" '
     $0 == s {skip=1}
     !skip {print}
     $0 == e {skip=0}
-  ' "$RC" > "$TMP" && mv "$TMP" "$RC"
-  # Defer this note so it doesn't interrupt the in-place progress bar.
-  NOTE="Refreshed an existing Ctrl-R binding in $RC"
-fi
+  ' "$RC" > "$tmp" && mv "$tmp" "$RC"
+  return 0
+}
+
+# Each binding lives in its own marker pair so either can be refreshed or
+# removed independently of the other.
+NOTES=()
+strip_block "$MEM_MARKER" "$MEM_END_MARKER" && NOTES+=("Ctrl-R binding")
+strip_block "$ZEL_MARKER" "$ZEL_END_MARKER" && NOTES+=("zl binding")
 
 case "$SHELL_NAME" in
   zsh)
@@ -127,6 +153,11 @@ memcommands-widget() { fc -W; memcommands "$BUFFER" </dev/tty; zle reset-prompt 
 zle -N memcommands-widget
 bindkey '^R' memcommands-widget
 # <<< memcommands (Ctrl-R) <<<
+
+# >>> zelcommands (zl) >>>
+case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
+zl() { zelcommands "$@"; }
+# <<< zelcommands (zl) <<<
 EOF
     ;;
   bash)
@@ -137,6 +168,11 @@ case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$P
 memcommands-widget() { history -a; memcommands "$READLINE_LINE"; }
 bind -x '"\C-r": memcommands-widget'
 # <<< memcommands (Ctrl-R) <<<
+
+# >>> zelcommands (zl) >>>
+case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac
+zl() { zelcommands "$@"; }
+# <<< zelcommands (zl) <<<
 EOF
     ;;
   fish)
@@ -152,16 +188,27 @@ function memcommands-widget
 end
 bind \cr memcommands-widget
 # <<< memcommands (Ctrl-R) <<<
+
+# >>> zelcommands (zl) >>>
+if not contains $HOME/.local/bin $PATH
+    set -gx PATH $HOME/.local/bin $PATH
+end
+function zl
+    zelcommands $argv
+end
+# <<< zelcommands (zl) <<<
 EOF
     ;;
 esac
 
-progress "Added Ctrl-R binding to $RC"
+progress "Added the Ctrl-R and zl bindings to $RC"
 
 # Success: everything above completed without tripping the ERR trap.
 trap - ERR
 # Close off the in-place progress bar, then surface any deferred note.
 printf '\n'
-[ -n "${NOTE:-}" ] && printf '%s%s%s\n' "$DIM" "$NOTE" "$RESET"
-printf '%s%s✓ Done.%s Open a new %s session (or run: %ssource "%s"%s) and press %sCtrl-R%s.\n' \
-  "$BOLD" "$GREEN" "$RESET" "$SHELL_NAME" "$BOLD" "$RC" "$RESET" "$BOLD" "$RESET"
+if [ ${#NOTES[@]} -gt 0 ]; then
+  IFS=', '; printf '%sRefreshed existing %s in %s%s\n' "$DIM" "${NOTES[*]}" "$RC" "$RESET"; unset IFS
+fi
+printf '%s%s✓ Done.%s Open a new %s session (or run: %ssource "%s"%s), then press %sCtrl-R%s for memcommands or type %szl%s for zelcommands.\n' \
+  "$BOLD" "$GREEN" "$RESET" "$SHELL_NAME" "$BOLD" "$RC" "$RESET" "$BOLD" "$RESET" "$BOLD" "$RESET"

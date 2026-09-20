@@ -46,7 +46,7 @@ func runShellCommand(command string, aliases core.AliasIndex) error {
 	}
 
 	args := []string{shell, "-lc", core.ExpandAliasCommand(command, aliases)}
-	return execShellCommand(core.ShellExecutable(shell), args)
+	return core.ExecReplace(core.ShellExecutable(shell), args)
 }
 
 func commandName(command string) string {

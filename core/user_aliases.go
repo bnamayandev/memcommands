@@ -8,7 +8,7 @@ import (
 	"path/filepath"
 )
 
-func userAliasPath() (string, error) {
+func userAliasPath(appName string) (string, error) {
 	dir := os.Getenv("XDG_CONFIG_HOME")
 	if dir == "" {
 		home, err := os.UserHomeDir()
@@ -17,11 +17,11 @@ func userAliasPath() (string, error) {
 		}
 		dir = filepath.Join(home, ".config")
 	}
-	return filepath.Join(dir, "memcommands", "aliases.json"), nil
+	return filepath.Join(dir, appName, "aliases.json"), nil
 }
 
-func LoadUserAliases() map[string]string {
-	path, err := userAliasPath()
+func LoadUserAliases(appName string) map[string]string {
+	path, err := userAliasPath(appName)
 	if err != nil {
 		return map[string]string{}
 	}
@@ -38,8 +38,8 @@ func LoadUserAliases() map[string]string {
 	return aliases
 }
 
-func SaveUserAliases(aliases map[string]string) error {
-	path, err := userAliasPath()
+func SaveUserAliases(appName string, aliases map[string]string) error {
+	path, err := userAliasPath(appName)
 	if err != nil {
 		return err
 	}

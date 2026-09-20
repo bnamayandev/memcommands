@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 )
 
-func pinnedPath() (string, error) {
+func pinnedPath(appName string) (string, error) {
 	dir := os.Getenv("XDG_CONFIG_HOME")
 	if dir == "" {
 		home := os.Getenv("HOME")
@@ -18,11 +18,11 @@ func pinnedPath() (string, error) {
 		}
 		dir = filepath.Join(home, ".config")
 	}
-	return filepath.Join(dir, "memcommands", "pinned.json"), nil
+	return filepath.Join(dir, appName, "pinned.json"), nil
 }
 
-func LoadPinnedCommands() []string {
-	path, err := pinnedPath()
+func LoadPinnedCommands(appName string) []string {
+	path, err := pinnedPath(appName)
 	if err != nil {
 		return nil
 	}
@@ -39,8 +39,8 @@ func LoadPinnedCommands() []string {
 	return commands
 }
 
-func SavePinnedCommands(commands []string) error {
-	path, err := pinnedPath()
+func SavePinnedCommands(appName string, commands []string) error {
+	path, err := pinnedPath(appName)
 	if err != nil {
 		return err
 	}
