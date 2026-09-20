@@ -201,7 +201,7 @@ func (m model) helpView(width int) string {
 		}},
 		{"Save & run", []binding{
 			{"enter", "run the selected command"},
-			{":w / :wq", "save / save and quit"},
+			{":w / :wq / :wqa", "save / save and quit"},
 			{":q / :q!", "quit / discard and quit"},
 			{"esc", "back to search"},
 		}},

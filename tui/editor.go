@@ -309,7 +309,7 @@ func (m model) runExCommand() (tea.Model, tea.Cmd) {
 		m.save()
 		m.statusMsg = "written"
 		return m, nil
-	case "wq", "x":
+	case "wq", "wqa", "x":
 		m.save()
 		return m.quit()
 	case "q":
