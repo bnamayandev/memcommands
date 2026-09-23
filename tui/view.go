@@ -9,19 +9,19 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// Catppuccin Mocha palette.
+// Gruvbox Dark palette.
 const (
-	colBase     = "#1E1E2E"
-	colSurface0 = "#313244"
-	colSurface1 = "#45475A"
-	colOverlay0 = "#6C7086"
-	colText     = "#CDD6F4"
-	colBlue     = "#89B4FA"
-	colGreen    = "#A6E3A1"
-	colMauve    = "#CBA6F7"
-	colPeach    = "#FAB387"
-	colYellow   = "#F9E2AF"
-	colRed      = "#F38BA8"
+	colBase     = "#282828"
+	colSurface0 = "#3C3836"
+	colSurface1 = "#504945"
+	colOverlay0 = "#928374"
+	colText     = "#EBDBB2"
+	colBlue     = "#83A598"
+	colGreen    = "#B8BB26"
+	colMauve    = "#D3869B"
+	colPeach    = "#FE8019"
+	colYellow   = "#FABD2F"
+	colRed      = "#FB4934"
 )
 
 // hPad is the horizontal padding inside each bordered block.
